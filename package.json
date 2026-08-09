@@ -1,0 +1,53 @@
+{
+  "name": "momentum",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Momentum — personal habit tracker backend",
+  "engines": {
+    "node": ">=20.6"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check": "npm run lint && npm run typecheck && npm run test",
+    "dev": "concurrently -n api,worker -c cyan,magenta \"npm run dev:api\" \"npm run dev:worker\"",
+    "dev:api": "npm run dev -w @momentum/api",
+    "dev:worker": "npm run dev -w @momentum/worker",
+    "db:generate": "npm exec -w @momentum/api -- prisma generate",
+    "db:migrate": "npm exec -w @momentum/api -- prisma migrate dev",
+    "db:deploy": "npm exec -w @momentum/api -- prisma migrate deploy",
+    "db:studio": "npm exec -w @momentum/api -- prisma studio",
+    "db:set": "npm exec -w @momentum/api -- prisma migrate reset",
+    "db:seed": "npm run seed -w @momentum/api",
+    "check:db": "node --env-file=.env --import tsx apps/api/scripts/check-db.ts",
+    "check:redis": "node --env-file=.env --import tsx apps/api/scripts/check-redis.ts",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.2.0",
+    "concurrently": "^10.0.4",
+    "eslint": "^10.8.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.11",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.66.0"
+  }
+}
