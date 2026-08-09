@@ -27,6 +27,9 @@ export default tseslint.config(
       '**/*.mjs',
     ],
     ...tseslint.configs.disableTypeChecked,
-    rules: { 'no-console': 'off' },
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      'no-console': 'off',
+    },
   },
 );

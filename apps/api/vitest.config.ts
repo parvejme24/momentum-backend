@@ -4,7 +4,8 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     setupFiles: ['tests/setup.ts'],
+    passWithNoTests: true,
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } }
-  }
+    fileParallelism: false,
+  },
 });

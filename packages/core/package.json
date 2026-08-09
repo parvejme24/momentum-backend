@@ -21,5 +21,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.10",
+    "vitest": "^4.1.10"
   }
 }
