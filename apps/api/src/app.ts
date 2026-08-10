@@ -6,8 +6,10 @@ import { env } from './lib/env.js';
 import { logger } from './lib/logger.js';
 import { errorHandler } from './middleware/error.js';
 import { authRouter } from './modules/auth/auth.route.js';
+import { deviceRouter } from './modules/device/device.route.js';
 import { habitRouter } from './modules/habit/habit.route.js';
 import { logsRouter } from './modules/log/log.route.js';
+import { reminderRouter } from './modules/reminder/reminder.route.js';
 import { statsRouter } from './modules/stats/stats.route.js';
 import { todayRouter } from './modules/today/today.route.js';
 import { apiRouter } from './routes.js';
@@ -44,6 +46,8 @@ export function createApp() {
   app.use('/v1/logs', logsRouter);
   app.use('/v1/today', todayRouter);
   app.use('/v1/stats', statsRouter);
+  app.use('/v1/reminders', reminderRouter);
+  app.use('/v1/devices', deviceRouter);
 
   app.use(errorHandler);
 
