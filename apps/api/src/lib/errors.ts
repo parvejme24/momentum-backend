@@ -14,4 +14,20 @@ export class AppError extends Error {
       this.details = details;
     }
   }
+
+  static notFound(message = 'Not found'): AppError {
+    return new AppError(message, 404, 'NOT_FOUND');
+  }
+
+  static validation(message: string, details: Array<{ field: string; issue: string }>): AppError {
+    return new AppError(message, 400, 'VALIDATION_ERROR', details);
+  }
+
+  static unauthorized(message = 'Unauthorized'): AppError {
+    return new AppError(message, 401, 'UNAUTHORIZED');
+  }
+
+  static conflict(message: string): AppError {
+    return new AppError(message, 409, 'CONFLICT');
+  }
 }

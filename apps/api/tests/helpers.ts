@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { createApp } from '../src/app.js';
 import { prisma } from '../src/lib/prisma.js';
+import { redis } from '../src/lib/redis.js';
 import { hashRefreshToken } from '../src/lib/tokens.js';
 
 export function createTestApp() {
@@ -8,11 +9,17 @@ export function createTestApp() {
 }
 
 export async function cleanupUserByEmail(email: string): Promise<void> {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) return;
+  await prisma.user.deleteMany({ where: { email } });
+}
 
-  await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
-  await prisma.user.delete({ where: { id: user.id } });
+export async function cleanupUsersByEmails(emails: string[]): Promise<void> {
+  if (emails.length === 0) return;
+  await prisma.user.deleteMany({ where: { email: { in: emails } } });
+}
+
+export async function closeTestResources(): Promise<void> {
+  await prisma.$disconnect();
+  await redis.quit().catch(() => undefined);
 }
 
 export async function registerUser(

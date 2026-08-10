@@ -1,15 +1,33 @@
-import type { RequestHandler } from 'express';
+import type { Request, RequestHandler } from 'express';
 import type { ZodType } from 'zod';
 import { AppError } from '../lib/errors.js';
 
 type RequestTarget = 'body' | 'query' | 'params';
+
+function zodDetails(error: {
+  issues: Array<{ path: PropertyKey[]; message: string }>;
+}): Array<{ field: string; issue: string }> {
+  return error.issues.map((issue) => ({
+    field: issue.path.length > 0 ? issue.path.map(String).join('.') : '_root',
+    issue: issue.message,
+  }));
+}
+
+function replaceRequestProperty(req: Request, key: 'query' | 'params', value: unknown): void {
+  Object.defineProperty(req, key, {
+    value,
+    writable: true,
+    configurable: true,
+    enumerable: true,
+  });
+}
 
 export function validate(schema: ZodType, target: RequestTarget = 'body'): RequestHandler {
   return (req, _res, next) => {
     const result = schema.safeParse(req[target]);
 
     if (!result.success) {
-      next(new AppError('Invalid request', 400, 'VALIDATION_ERROR', result.error.flatten()));
+      next(AppError.validation('Check the highlighted fields', zodDetails(result.error)));
       return;
     }
 
@@ -18,10 +36,10 @@ export function validate(schema: ZodType, target: RequestTarget = 'body'): Reque
         req.body = result.data;
         break;
       case 'query':
-        req.query = result.data as typeof req.query;
+        replaceRequestProperty(req, 'query', result.data);
         break;
       case 'params':
-        req.params = result.data as typeof req.params;
+        replaceRequestProperty(req, 'params', result.data);
         break;
     }
 

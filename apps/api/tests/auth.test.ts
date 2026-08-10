@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  cleanupUserByEmail,
+  cleanupUsersByEmails,
+  closeTestResources,
   createTestApp,
   hashRefreshToken,
   prisma,
@@ -22,10 +23,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  for (const email of emails) {
-    await cleanupUserByEmail(email);
-  }
-  await prisma.$disconnect();
+  await cleanupUsersByEmails(emails);
+  await closeTestResources();
 });
 
 describe('auth', () => {
