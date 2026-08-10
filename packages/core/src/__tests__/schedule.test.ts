@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeSchedule, eachDueDate, isDue } from '../schedule.js';
+import { describeSchedule, eachDueDate, isDue, nextDueDate } from '../schedule.js';
 import type { HabitSchedule } from '../types.js';
 
 const daily: HabitSchedule = {
@@ -81,5 +81,12 @@ describe('schedule', () => {
     expect(eachDueDate(daily, '2026-07-01', '2026-07-02')).toEqual([]);
     expect(eachDueDate(specific, '2026-08-10', '2026-08-12')).toEqual(['2026-08-10', '2026-08-12']);
     expect(eachDueDate(daily, '2026-07-30', '2026-08-02')).toEqual(['2026-08-01', '2026-08-02']);
+  });
+
+  it('nextDueDate finds the next due day after from', () => {
+    expect(nextDueDate(daily, '2026-08-10')).toBe('2026-08-11');
+    // 2026-08-10 is Monday; next Mon/Wed/Fri after a Tuesday
+    expect(nextDueDate(specific, '2026-08-11')).toBe('2026-08-12');
+    expect(nextDueDate({ ...interval, intervalDays: null }, '2026-08-01')).toBeNull();
   });
 });

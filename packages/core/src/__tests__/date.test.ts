@@ -4,8 +4,11 @@ import {
   assertLocalDate,
   compareLocalDates,
   dayOfWeek,
+  daysBetween,
   diffDays,
+  eachDay,
   localDate,
+  startOfWeek,
   todayIn,
 } from '../date.js';
 
@@ -50,9 +53,17 @@ describe('date', () => {
     expect(addDays('2026-08-10', 1)).toBe('2026-08-11');
     expect(addDays('2026-08-10', -1)).toBe('2026-08-09');
     expect(diffDays('2026-08-01', '2026-08-10')).toBe(9);
+    expect(daysBetween('2026-08-10', '2026-08-01')).toBe(9);
     expect(dayOfWeek('2026-08-10')).toBe(1); // Monday
     expect(compareLocalDates('2026-08-09', '2026-08-10')).toBe(-1);
     expect(compareLocalDates('2026-08-10', '2026-08-09')).toBe(1);
     expect(compareLocalDates('2026-08-10', '2026-08-10')).toBe(0);
+  });
+
+  it('startOfWeek and eachDay', () => {
+    expect(startOfWeek('2026-08-12', 1)).toBe('2026-08-10'); // Wed → Mon
+    expect(startOfWeek('2026-08-10', 0)).toBe('2026-08-09'); // Mon → Sun
+    expect(eachDay('2026-08-10', '2026-08-09')).toEqual([]);
+    expect(eachDay('2026-08-10', '2026-08-12')).toEqual(['2026-08-10', '2026-08-11', '2026-08-12']);
   });
 });

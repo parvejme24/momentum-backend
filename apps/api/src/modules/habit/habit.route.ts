@@ -4,6 +4,7 @@ import { requireHabitOwnership } from '../../middleware/ownership.js';
 import { validate } from '../../middleware/validate.js';
 import { asyncHandler } from '../../utils/async-handler.js';
 import { habitLogRouter } from '../log/log.route.js';
+import { habitStatsRouter } from '../stats/stats.route.js';
 import * as habitController from './habit.controller.js';
 import {
   createHabitSchema,
@@ -23,8 +24,9 @@ habitRouter.post('/', validate(createHabitSchema), asyncHandler(habitController.
 
 habitRouter.patch('/reorder', validate(reorderHabitsSchema), asyncHandler(habitController.reorder));
 
-// Nested log routes before bare `/:id` handlers for clarity
+// Nested routes before bare `/:id` handlers for clarity
 habitRouter.use('/:id/logs', habitLogRouter);
+habitRouter.use('/:id/stats', habitStatsRouter);
 
 habitRouter.get('/:id', requireHabitOwnership, asyncHandler(habitController.getById));
 

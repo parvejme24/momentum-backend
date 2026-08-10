@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { completionRate, daysSinceStart, streakFor } from '../streak.js';
+import { completionRate, daysSinceStart, isStreakAtRisk, streakFor } from '../streak.js';
 import type { HabitSchedule, LocalDate, LogStatus } from '../types.js';
 
 function logs(entries: Array<[LocalDate, LogStatus]>): Map<LocalDate, LogStatus> {
@@ -177,6 +177,20 @@ describe('streak', () => {
     expect(completionRate(daily, logs([['2026-08-10', 'DONE']]), '2026-08-10', '2026-08-11')).toBe(
       0.5,
     );
+    expect(
+      completionRate(
+        daily,
+        logs([
+          ['2026-08-10', 'DONE'],
+          ['2026-08-11', 'SKIPPED'],
+        ]),
+        '2026-08-10',
+        '2026-08-11',
+      ),
+    ).toBe(1);
+    expect(
+      completionRate(daily, logs([['2026-08-10', 'SKIPPED']]), '2026-08-10', '2026-08-10'),
+    ).toBe(0);
 
     expect(
       completionRate({ ...weekly, targetPerWeek: null }, logs([]), '2026-08-10', '2026-08-16'),
@@ -236,5 +250,21 @@ describe('streak', () => {
   it('daysSinceStart never goes negative', () => {
     expect(daysSinceStart(daily, '2026-08-10')).toBe(9);
     expect(daysSinceStart(daily, '2026-07-01')).toBe(0);
+  });
+
+  it('isStreakAtRisk detects live unmarked due streaks', () => {
+    expect(isStreakAtRisk(daily, logs([['2026-08-09', 'DONE']]), '2026-08-10')).toBe(true);
+    expect(
+      isStreakAtRisk(
+        daily,
+        logs([
+          ['2026-08-09', 'DONE'],
+          ['2026-08-10', 'DONE'],
+        ]),
+        '2026-08-10',
+      ),
+    ).toBe(false);
+    expect(isStreakAtRisk(daily, logs([]), '2026-08-10')).toBe(false);
+    expect(isStreakAtRisk(specific, logs([['2026-08-10', 'DONE']]), '2026-08-11')).toBe(false);
   });
 });

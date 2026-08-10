@@ -56,3 +56,15 @@ export function eachDueDate(habit: HabitSchedule, from: LocalDate, to: LocalDate
   }
   return dates;
 }
+
+/** Next due date strictly after `from` (searches up to ~2 years). */
+export function nextDueDate(habit: HabitSchedule, from: LocalDate): LocalDate | null {
+  const searchStart = addDays(from, 1);
+  const limit = addDays(searchStart, 366 * 2);
+  let cursor = searchStart;
+  while (compareLocalDates(cursor, limit) <= 0) {
+    if (isDue(habit, cursor)) return cursor;
+    cursor = addDays(cursor, 1);
+  }
+  return null;
+}

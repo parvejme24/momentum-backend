@@ -60,3 +60,26 @@ export function dayOfWeek(date: LocalDate): number {
 export function compareLocalDates(a: LocalDate, b: LocalDate): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+
+/** Absolute day distance between two local dates. */
+export function daysBetween(from: LocalDate, to: LocalDate): number {
+  return Math.abs(diffDays(from, to));
+}
+
+export function startOfWeek(date: LocalDate, weekStartsOn: number = 0): LocalDate {
+  const start = ((weekStartsOn % 7) + 7) % 7;
+  const dow = dayOfWeek(date);
+  const offset = (dow - start + 7) % 7;
+  return addDays(date, -offset);
+}
+
+export function eachDay(from: LocalDate, to: LocalDate): LocalDate[] {
+  if (compareLocalDates(from, to) > 0) return [];
+  const days: LocalDate[] = [];
+  let cursor = from;
+  while (compareLocalDates(cursor, to) <= 0) {
+    days.push(cursor);
+    cursor = addDays(cursor, 1);
+  }
+  return days;
+}

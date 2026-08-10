@@ -155,15 +155,34 @@ export function completionRate(
   const dueDates = eachDueDate(habit, from, to);
   if (dueDates.length === 0) return 0;
 
+  let eligible = 0;
   let completed = 0;
   for (const date of dueDates) {
     const status = logs.get(date);
+    // Skipped days leave the denominator — you can't fail a rest day.
+    if (status === 'SKIPPED') continue;
+    eligible += 1;
     if (isCompleted(status)) completed += 1;
   }
 
-  return completed / dueDates.length;
+  return eligible === 0 ? 0 : completed / eligible;
 }
 
 export function daysSinceStart(habit: HabitSchedule, today: LocalDate): number {
   return Math.max(0, diffDays(habit.startDate, today));
+}
+
+/**
+ * True when the habit has a live streak, is due on `today`, and is still unmarked
+ * (no DONE/PARTIAL/SKIPPED log for that day).
+ */
+export function isStreakAtRisk(
+  habit: HabitSchedule,
+  logs: Map<LocalDate, LogStatus>,
+  today: LocalDate,
+  weekStartsOn: number = 0,
+): boolean {
+  if (!isDue(habit, today)) return false;
+  if (logs.has(today)) return false;
+  return streakFor(habit, logs, today, weekStartsOn) > 0;
 }
