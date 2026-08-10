@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@momentum/core": "*",
-    "@momentum/types": "*"
+    "@momentum/types": "*",
+    "@prisma/adapter-pg": "^7.9.1"
   },
   "devDependencies": {
     "@types/nodemailer": "^8.0.1",
