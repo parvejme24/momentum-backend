@@ -3,6 +3,7 @@ import { requireAuth } from '../../middleware/auth.js';
 import { requireHabitOwnership } from '../../middleware/ownership.js';
 import { validate } from '../../middleware/validate.js';
 import { asyncHandler } from '../../utils/async-handler.js';
+import { habitLogRouter } from '../log/log.route.js';
 import * as habitController from './habit.controller.js';
 import {
   createHabitSchema,
@@ -21,6 +22,9 @@ habitRouter.get('/', validate(listHabitsQuerySchema, 'query'), asyncHandler(habi
 habitRouter.post('/', validate(createHabitSchema), asyncHandler(habitController.create));
 
 habitRouter.patch('/reorder', validate(reorderHabitsSchema), asyncHandler(habitController.reorder));
+
+// Nested log routes before bare `/:id` handlers for clarity
+habitRouter.use('/:id/logs', habitLogRouter);
 
 habitRouter.get('/:id', requireHabitOwnership, asyncHandler(habitController.getById));
 
