@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push cancels an in-flight run on the same branch — no point
+# burning minutes on a commit that's already been superseded.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────
+  #  1. Domain logic — fast, no services, fails in ~30 seconds
+  # ────────────────────────────────────────────────────────────
+  core:
+    name: Domain logic
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build shared packages
+        run: |
+          npm run build -w @momentum/core
+          npm run build -w @momentum/types
+
+      # The vitest config enforces 100% coverage on packages/core.
+      # A drop below that fails the build, which is the point.
+      - name: Test domain logic
+        run: npm test -w @momentum/core
+
+  # ────────────────────────────────────────────────────────────
+  #  2. API — needs a real Postgres and Redis
+  # ────────────────────────────────────────────────────────────
+  api:
+    name: API
+    runs-on: ubuntu-latest
+    needs: core
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: momentum
+          POSTGRES_PASSWORD: momentum
+          POSTGRES_DB: momentum_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U momentum"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      LOG_LEVEL: error
+      # Throwaway containers, not the real Neon/Redis Cloud instances.
+      # Migrations run against a clean database on every job.
+      DATABASE_URL: postgresql://momentum:momentum@localhost:5432/momentum_test?schema=public
+      DIRECT_URL: postgresql://momentum:momentum@localhost:5432/momentum_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      REDIS_TLS: 'false'
+      JWT_ACCESS_SECRET: ci-access-secret-long-enough-to-satisfy-the-zod-schema
+      JWT_REFRESH_SECRET: ci-refresh-secret-long-enough-to-satisfy-zod-too
+      CORS_ORIGINS: http://localhost:3000
+      APP_URL: http://localhost:3000
+      VAPID_PUBLIC_KEY: BEl62iUYgUivxIkv69yViEuiBIa1FDpiSCEt3JCkNVpNLPmm8_2xVXR3Kk
+      VAPID_PRIVATE_KEY: UUxI4O8-FbRouAevSmBQ6o18hgE4nSG3qwvJTfKc-ls
+      VAPID_SUBJECT: mailto:ci@example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build shared packages
+        run: |
+          npm run build -w @momentum/core
+          npm run build -w @momentum/types
+
+      # Must run before typecheck — the generated client is what gives
+      # Prisma its types, and without it tsc fails on every model.
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      # `migrate deploy`, not `migrate dev`: it applies committed migrations
+      # and never invents new ones. If a migration is missing from the repo,
+      # this is where it surfaces — in a PR, not on the server.
+      - name: Apply migrations
+        run: npm exec -w @momentum/api -- prisma migrate deploy
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test -w @momentum/api
+
+  # ────────────────────────────────────────────────────────────
+  #  3. Build — proves the thing actually compiles
+  # ────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [core, api]
+
+    env:
+      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      # Order matters: api and worker import core and types from dist/,
+      # so those have to exist first. `--workspaces` doesn't guarantee
+      # dependency order, hence the explicit sequence.
+      - name: Build all
+        run: |
+          npm run build -w @momentum/core
+          npm run build -w @momentum/types
+          npm run build -w @momentum/api
+          npm run build -w @momentum/worker
