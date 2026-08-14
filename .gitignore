@@ -8,5 +8,5 @@ coverage/
 .DS_Store
 .vscode/
 apps/api/.env
-package-lock.json
 apps/api/src/generated/
+.vercel
