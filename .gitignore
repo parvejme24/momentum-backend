@@ -9,4 +9,3 @@ coverage/
 .vscode/
 apps/api/.env
 apps/api/src/generated/
-.vercel
