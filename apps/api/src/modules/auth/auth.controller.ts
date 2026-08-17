@@ -1,10 +1,13 @@
 import type {
   ChangePasswordInput,
+  ForgotPasswordInput,
   LoginInput,
   LogoutInput,
   RefreshInput,
   RegisterInput,
+  ResetPasswordInput,
   UpdateMeInput,
+  VerifyEmailInput,
 } from '@momentum/types';
 import type { Request, Response } from 'express';
 import { AppError } from '../../lib/errors.js';
@@ -74,5 +77,37 @@ export async function changePassword(req: Request, res: Response): Promise<void>
   res.status(200).json({
     success: true,
     message: 'Password changed successfully. Please log in again.',
+  });
+}
+
+export async function forgotPassword(req: Request, res: Response): Promise<void> {
+  await authService.forgotPassword(req.body as ForgotPasswordInput);
+  res.status(200).json({
+    success: true,
+    message: 'If that email is registered, we sent a reset link.',
+  });
+}
+
+export async function resetPassword(req: Request, res: Response): Promise<void> {
+  await authService.resetPassword(req.body as ResetPasswordInput);
+  res.status(200).json({
+    success: true,
+    message: 'Password reset successfully. Please log in.',
+  });
+}
+
+export async function verifyEmail(req: Request, res: Response): Promise<void> {
+  await authService.verifyEmail(req.body as VerifyEmailInput);
+  res.status(200).json({
+    success: true,
+    message: 'Email verified.',
+  });
+}
+
+export async function resendVerification(req: Request, res: Response): Promise<void> {
+  await authService.resendVerification(requireUserId(req));
+  res.status(200).json({
+    success: true,
+    message: 'If your email is not verified, we sent a new link.',
   });
 }

@@ -6,11 +6,14 @@ import { asyncHandler } from '../../utils/async-handler.js';
 import * as authController from './auth.controller.js';
 import {
   changePasswordSchema,
+  forgotPasswordSchema,
   loginSchema,
   logoutSchema,
   refreshSchema,
   registerSchema,
+  resetPasswordSchema,
   updateMeSchema,
+  verifyEmailSchema,
 } from './auth.schema.js';
 
 export const authRouter = Router();
@@ -49,4 +52,31 @@ authRouter.post(
   requireAuth,
   validate(changePasswordSchema),
   asyncHandler(authController.changePassword),
+);
+
+authRouter.post(
+  '/forgot-password',
+  authRateLimit,
+  validate(forgotPasswordSchema),
+  asyncHandler(authController.forgotPassword),
+);
+
+authRouter.post(
+  '/reset-password',
+  authRateLimit,
+  validate(resetPasswordSchema),
+  asyncHandler(authController.resetPassword),
+);
+
+authRouter.post(
+  '/verify-email',
+  validate(verifyEmailSchema),
+  asyncHandler(authController.verifyEmail),
+);
+
+authRouter.post(
+  '/resend-verification',
+  requireAuth,
+  authRateLimit,
+  asyncHandler(authController.resendVerification),
 );

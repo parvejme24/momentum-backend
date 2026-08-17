@@ -186,4 +186,73 @@ describe('auth', () => {
 
     expect(refreshAfter.status).toBe(401);
   });
+
+  it('register stores a verification token and verify-email sets emailVerifiedAt', async () => {
+    const email = trackEmail(`verify-${Date.now()}@example.com`);
+    const { res: registered } = await registerUser(app, { email });
+    const userId = registered.body.user.id as string;
+    expect(registered.body.user.emailVerifiedAt).toBeNull();
+
+    const tokenRow = await prisma.emailToken.findFirst({
+      where: { userId, type: 'VERIFY_EMAIL', usedAt: null },
+    });
+    expect(tokenRow).toBeTruthy();
+    if (!tokenRow) return;
+
+    const raw = `probe-${Date.now()}`;
+    await prisma.emailToken.update({
+      where: { id: tokenRow.id },
+      data: { tokenHash: hashRefreshToken(raw) },
+    });
+
+    const verified = await request(app).post('/v1/auth/verify-email').send({ token: raw });
+    expect(verified.status).toBe(200);
+
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(user.emailVerifiedAt).not.toBeNull();
+  });
+
+  it('forgot-password and reset-password rotate the password without leaking emails', async () => {
+    const email = trackEmail(`reset-${Date.now()}@example.com`);
+    const { res: registered } = await registerUser(app, { email, password: 'password123' });
+    const userId = registered.body.user.id as string;
+
+    const unknown = await request(app)
+      .post('/v1/auth/forgot-password')
+      .send({ email: `missing-${Date.now()}@example.com` });
+    expect(unknown.status).toBe(200);
+
+    const forgot = await request(app).post('/v1/auth/forgot-password').send({ email });
+    expect(forgot.status).toBe(200);
+
+    const tokenRow = await prisma.emailToken.findFirst({
+      where: { userId, type: 'RESET_PASSWORD', usedAt: null },
+    });
+    expect(tokenRow).toBeTruthy();
+    if (!tokenRow) return;
+
+    const raw = `reset-${Date.now()}`;
+    await prisma.emailToken.update({
+      where: { id: tokenRow.id },
+      data: { tokenHash: hashRefreshToken(raw) },
+    });
+
+    const reset = await request(app).post('/v1/auth/reset-password').send({
+      token: raw,
+      newPassword: 'brandnewpass1',
+    });
+    expect(reset.status).toBe(200);
+
+    const oldLogin = await request(app).post('/v1/auth/login').send({
+      email,
+      password: 'password123',
+    });
+    expect(oldLogin.status).toBe(401);
+
+    const newLogin = await request(app).post('/v1/auth/login').send({
+      email,
+      password: 'brandnewpass1',
+    });
+    expect(newLogin.status).toBe(200);
+  });
 });
