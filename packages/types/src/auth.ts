@@ -48,12 +48,28 @@ export const changePasswordSchema = z.object({
   newPassword: passwordSchema,
 });
 
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  newPassword: passwordSchema,
+});
+
+export const verifyEmailSchema = z.object({
+  token: z.string().min(1),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RefreshInput = z.infer<typeof refreshSchema>;
 export type LogoutInput = z.infer<typeof logoutSchema>;
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
 
 export type PublicUser = {
   id: string;
@@ -62,6 +78,7 @@ export type PublicUser = {
   avatarUrl: string | null;
   timezone: string;
   weekStartsOn: number;
+  role: 'admin' | 'customer';
   emailVerifiedAt: string | null;
   createdAt: string;
   updatedAt: string;

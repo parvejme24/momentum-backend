@@ -12,6 +12,7 @@ import { logsRouter } from './modules/log/log.route.js';
 import { reminderRouter } from './modules/reminder/reminder.route.js';
 import { statsRouter } from './modules/stats/stats.route.js';
 import { todayRouter } from './modules/today/today.route.js';
+import { adminPricingRouter, pricingRouter } from './modules/pricing/pricing.route.js';
 import { apiRouter } from './routes.js';
 
 export function createApp() {
@@ -48,6 +49,8 @@ export function createApp() {
   app.use('/v1/stats', statsRouter);
   app.use('/v1/reminders', reminderRouter);
   app.use('/v1/devices', deviceRouter);
+  app.use('/v1/pricing', pricingRouter);
+  app.use('/v1/admin/pricing', adminPricingRouter);
 
   app.use(errorHandler);
 

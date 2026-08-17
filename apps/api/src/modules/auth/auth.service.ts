@@ -1,15 +1,24 @@
 import type {
   AuthResponse,
   ChangePasswordInput,
+  ForgotPasswordInput,
   LoginInput,
   PublicUser,
   RegisterInput,
+  ResetPasswordInput,
   UpdateMeInput,
+  VerifyEmailInput,
 } from '@momentum/types';
 import { Prisma } from '../../generated/prisma/client.js';
+import type { EmailTokenType } from '../../generated/prisma/client.js';
 import { env } from '../../lib/env.js';
 import { AppError } from '../../lib/errors.js';
 import { signAccessToken } from '../../lib/jwt.js';
+import {
+  sendPasswordChangedEmail,
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+} from '../../lib/mailer.js';
 import { hashPassword, verifyPassword } from '../../lib/password.js';
 import { prisma } from '../../lib/prisma.js';
 import { generateRefreshToken, hashRefreshToken } from '../../lib/tokens.js';
@@ -23,6 +32,7 @@ type UserRow = {
   avatarUrl: string | null;
   timezone: string;
   weekStartsOn: number;
+  role: 'CUSTOMER' | 'ADMIN';
   emailVerifiedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -44,6 +54,7 @@ function toPublicUser(user: UserRow): PublicUser {
     avatarUrl: user.avatarUrl,
     timezone: user.timezone,
     weekStartsOn: user.weekStartsOn,
+    role: user.role === 'ADMIN' ? 'admin' : 'customer',
     emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
@@ -88,6 +99,58 @@ async function revokeAllRefreshTokens(userId: string): Promise<void> {
   });
 }
 
+const VERIFY_EMAIL_TTL_MS = 24 * 60 * 60 * 1000;
+const RESET_PASSWORD_TTL_MS = 60 * 60 * 1000;
+
+async function issueEmailToken(
+  userId: string,
+  type: EmailTokenType,
+  ttlMs: number,
+): Promise<string> {
+  const raw = generateRefreshToken();
+  await prisma.$transaction([
+    prisma.emailToken.updateMany({
+      where: { userId, type, usedAt: null },
+      data: { usedAt: new Date() },
+    }),
+    prisma.emailToken.create({
+      data: {
+        userId,
+        type,
+        tokenHash: hashRefreshToken(raw),
+        expiresAt: new Date(Date.now() + ttlMs),
+      },
+    }),
+  ]);
+  return raw;
+}
+
+async function consumeEmailToken(rawToken: string, type: EmailTokenType) {
+  const row = await prisma.emailToken.findUnique({
+    where: { tokenHash: hashRefreshToken(rawToken) },
+    include: { user: true },
+  });
+
+  if (
+    !row ||
+    row.type !== type ||
+    row.usedAt ||
+    row.user.deletedAt ||
+    row.expiresAt.getTime() <= Date.now()
+  ) {
+    throw AppError.validation('Check the highlighted fields', [
+      { field: 'token', issue: 'is invalid or expired' },
+    ]);
+  }
+
+  await prisma.emailToken.update({
+    where: { id: row.id },
+    data: { usedAt: new Date() },
+  });
+
+  return row.user;
+}
+
 export async function register(
   input: RegisterInput,
   meta: RefreshMeta = {},
@@ -104,6 +167,9 @@ export async function register(
         weekStartsOn: input.weekStartsOn,
       },
     });
+
+    const verifyToken = await issueEmailToken(user.id, 'VERIFY_EMAIL', VERIFY_EMAIL_TTL_MS);
+    sendVerificationEmail(user.email, user.name, verifyToken);
 
     return issueTokenPair(user, meta);
   } catch (err) {
@@ -241,4 +307,57 @@ export async function changePassword(userId: string, input: ChangePasswordInput)
       data: { revokedAt: new Date() },
     }),
   ]);
+
+  sendPasswordChangedEmail(user.email, user.name);
+}
+
+export async function forgotPassword(input: ForgotPasswordInput): Promise<void> {
+  const user = await prisma.user.findFirst({
+    where: { email: input.email, deletedAt: null },
+  });
+  if (!user) return;
+
+  const token = await issueEmailToken(user.id, 'RESET_PASSWORD', RESET_PASSWORD_TTL_MS);
+  sendPasswordResetEmail(user.email, user.name, token);
+}
+
+export async function resetPassword(input: ResetPasswordInput): Promise<void> {
+  const user = await consumeEmailToken(input.token, 'RESET_PASSWORD');
+  const passwordHash = await hashPassword(input.newPassword);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    }),
+    prisma.refreshToken.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }),
+  ]);
+
+  sendPasswordChangedEmail(user.email, user.name);
+}
+
+export async function verifyEmail(input: VerifyEmailInput): Promise<void> {
+  const user = await consumeEmailToken(input.token, 'VERIFY_EMAIL');
+  if (user.emailVerifiedAt) return;
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { emailVerifiedAt: new Date() },
+  });
+}
+
+export async function resendVerification(userId: string): Promise<void> {
+  const user = await prisma.user.findFirst({
+    where: { id: userId, deletedAt: null },
+  });
+  if (!user) {
+    throw AppError.unauthorized('User not found');
+  }
+  if (user.emailVerifiedAt) return;
+
+  const token = await issueEmailToken(user.id, 'VERIFY_EMAIL', VERIFY_EMAIL_TTL_MS);
+  sendVerificationEmail(user.email, user.name, token);
 }

@@ -36,6 +36,29 @@ enum EmailTokenType {
   RESET_PASSWORD
 }
 
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+enum PlanStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum PlanInterval {
+  ONE_TIME
+  MONTH
+  YEAR
+  FOREVER
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELED
+}
+
 model User {
   id String @id @default(uuid()) @db.Uuid
 
@@ -45,8 +68,9 @@ model User {
 
   passwordHash String? @db.VarChar(72)
 
-  timezone     String @default("Asia/Dhaka") @db.VarChar(64)
-  weekStartsOn Int    @default(6) @db.SmallInt
+  timezone     String   @default("Asia/Dhaka") @db.VarChar(64)
+  weekStartsOn Int      @default(6) @db.SmallInt
+  role         UserRole @default(CUSTOMER)
 
   emailVerifiedAt DateTime?
   lastActiveAt    DateTime?
@@ -55,12 +79,15 @@ model User {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  habits        Habit[]
-  logs          HabitLog[]
-  devices       Device[]
-  refreshTokens RefreshToken[]
-  accounts      OAuthAccount[]
-  emailTokens   EmailToken[]
+  habits             Habit[]
+  logs               HabitLog[]
+  devices            Device[]
+  refreshTokens      RefreshToken[]
+  accounts           OAuthAccount[]
+  emailTokens        EmailToken[]
+  plansCreated       Plan[]             @relation("PlanCreatedBy")
+  plansUpdated       Plan[]             @relation("PlanUpdatedBy")
+  planSubscriptions  PlanSubscription[]
 
   @@index([deletedAt])
   @@map("users")
@@ -219,4 +246,97 @@ model Device {
   @@index([userId])
   @@index([lastSeenAt])
   @@map("devices")
+}
+
+model Plan {
+  id String @id @default(uuid()) @db.Uuid
+
+  slug String @unique @db.VarChar(64)
+  name String @db.VarChar(80)
+  blurb String @db.VarChar(280)
+
+  priceCents    Int
+  currency      String      @default("USD") @db.VarChar(3)
+  interval      PlanInterval
+  intervalCount Int         @default(1)
+  seatBased     Boolean     @default(false)
+
+  highlighted Boolean    @default(false)
+  sortOrder   Int        @default(0)
+  status      PlanStatus @default(DRAFT)
+
+  ctaLabel String  @default("Get started") @db.VarChar(40)
+  ctaHref  String  @default("/register") @db.VarChar(200)
+
+  limits Json @default("{}")
+
+  publishedAt DateTime?
+  currentVersion Int @default(1)
+
+  createdById String? @db.Uuid
+  updatedById String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdBy     User?              @relation("PlanCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedBy     User?              @relation("PlanUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  features      PlanFeature[]
+  versions      PlanVersion[]
+  subscriptions PlanSubscription[]
+
+  @@index([status, sortOrder])
+  @@index([highlighted, status])
+  @@map("plans")
+}
+
+model PlanFeature {
+  id        String @id @default(uuid()) @db.Uuid
+  planId    String @db.Uuid
+  label     String @db.VarChar(120)
+  sortOrder Int    @default(0)
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId, sortOrder])
+  @@map("plan_features")
+}
+
+model PlanVersion {
+  id     String @id @default(uuid()) @db.Uuid
+  planId String @db.Uuid
+  version Int
+
+  priceCents    Int
+  currency      String       @db.VarChar(3)
+  interval      PlanInterval
+  intervalCount Int
+  seatBased     Boolean
+  limits        Json
+
+  createdAt DateTime @default(now())
+  createdById String? @db.Uuid
+
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, version])
+  @@index([planId])
+  @@map("plan_versions")
+}
+
+model PlanSubscription {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  planId String @db.Uuid
+
+  status SubscriptionStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@index([planId, status])
+  @@index([userId])
+  @@map("plan_subscriptions")
 }
