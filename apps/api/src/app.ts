@@ -3,6 +3,7 @@ import express from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { env } from './lib/env.js';
+import { corsOrigins } from './lib/cors-origins.js';
 import { logger } from './lib/logger.js';
 import { errorHandler } from './middleware/error.js';
 import { authRouter } from './modules/auth/auth.route.js';
@@ -12,7 +13,22 @@ import { logsRouter } from './modules/log/log.route.js';
 import { reminderRouter } from './modules/reminder/reminder.route.js';
 import { statsRouter } from './modules/stats/stats.route.js';
 import { todayRouter } from './modules/today/today.route.js';
+import { adminUserRouter } from './modules/admin-user/admin-user.route.js';
+import { adminSubscriptionRouter } from './modules/admin-subscription/admin-subscription.route.js';
+import {
+  adminPaymentRouter,
+  adminRevenueRouter,
+} from './modules/admin-payment/admin-payment.route.js';
 import { adminPricingRouter, pricingRouter } from './modules/pricing/pricing.route.js';
+import { billingRouter } from './modules/billing/billing.route.js';
+import { mediaRouter } from './modules/media/media.route.js';
+import {
+  adminNotificationRouter,
+  notificationRouter,
+} from './modules/notification/notification.route.js';
+import { aiRouter } from './modules/ai/ai.route.js';
+import * as billingController from './modules/billing/billing.controller.js';
+import { asyncHandler } from './utils/async-handler.js';
 import { apiRouter } from './routes.js';
 
 export function createApp() {
@@ -22,10 +38,23 @@ export function createApp() {
   app.use(helmet());
   app.use(
     cors({
-      origin: env.CORS_ORIGINS,
+      origin: corsOrigins(),
       credentials: true,
     }),
   );
+
+  app.post(
+    '/v1/billing/webhook',
+    express.raw({ type: 'application/json' }),
+    asyncHandler(billingController.webhook),
+  );
+
+  app.post(
+    '/v1/billing/sslcommerz/ipn',
+    express.urlencoded({ extended: false }),
+    asyncHandler(billingController.sslCommerzIpn),
+  );
+
   app.use(express.json({ limit: '1mb' }));
   app.use(
     pinoHttp({
@@ -50,7 +79,16 @@ export function createApp() {
   app.use('/v1/reminders', reminderRouter);
   app.use('/v1/devices', deviceRouter);
   app.use('/v1/pricing', pricingRouter);
+  app.use('/v1/billing', billingRouter);
+  app.use('/v1/media', mediaRouter);
+  app.use('/v1/ai', aiRouter);
+  app.use('/v1/notifications', notificationRouter);
+  app.use('/v1/admin/users', adminUserRouter);
+  app.use('/v1/admin/subscriptions', adminSubscriptionRouter);
+  app.use('/v1/admin/payments', adminPaymentRouter);
+  app.use('/v1/admin/revenue', adminRevenueRouter);
   app.use('/v1/admin/pricing', adminPricingRouter);
+  app.use('/v1/admin/notifications', adminNotificationRouter);
 
   app.use(errorHandler);
 

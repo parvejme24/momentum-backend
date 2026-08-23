@@ -19,8 +19,20 @@ export class AppError extends Error {
     return new AppError(message, 404, 'NOT_FOUND');
   }
 
-  static validation(message: string, details: Array<{ field: string; issue: string }>): AppError {
-    return new AppError(message, 400, 'VALIDATION_ERROR', details);
+  static validation(
+    message: string,
+    details: Array<{ field: string; issue: string; message?: string }>,
+  ): AppError {
+    return new AppError(
+      message,
+      400,
+      'VALIDATION_ERROR',
+      details.map((detail) => ({
+        field: detail.field,
+        issue: detail.issue,
+        message: detail.message ?? detail.issue,
+      })),
+    );
   }
 
   static unauthorized(message = 'Unauthorized'): AppError {

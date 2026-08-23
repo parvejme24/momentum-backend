@@ -13,6 +13,7 @@
     "seed": "tsx --env-file=../../.env prisma/seed.ts"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@momentum/core": "*",
     "@momentum/types": "*",
     "@prisma/adapter-pg": "^7.9.1",
@@ -20,9 +21,11 @@
     "@socket.io/redis-adapter": "^8.3.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^6.0.9",
+    "cloudinary": "^2.10.1",
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.2",
+    "google-auth-library": "^11.0.2",
     "helmet": "^8.3.0",
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
@@ -31,6 +34,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "socket.io": "^4.8.3",
+    "stripe": "^22.5.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
