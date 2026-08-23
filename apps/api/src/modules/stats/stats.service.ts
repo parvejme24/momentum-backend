@@ -20,6 +20,7 @@ import type {
 } from '@momentum/types';
 import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
+import { assertHasStats } from '../../lib/entitlements.js';
 import { prisma } from '../../lib/prisma.js';
 import { fromPrismaDate, toPrismaDate } from '../../utils/date-guard.js';
 import { parseRange } from '../../utils/parse-range.js';
@@ -122,6 +123,7 @@ export async function getHabitStats(
   habitId: string,
   query: HabitStatsQuery,
 ): Promise<HabitStatsResponse> {
+  await assertHasStats(userId);
   // Query 1: habit + owner prefs
   const habit = await prisma.habit.findFirst({
     where: { id: habitId, userId },
@@ -236,6 +238,7 @@ export async function getOverviewStats(
   userId: string,
   query: OverviewStatsQuery,
 ): Promise<OverviewStatsResponse> {
+  await assertHasStats(userId);
   // Query 1: user + active habits
   const user = await prisma.user.findFirst({
     where: { id: userId, deletedAt: null },

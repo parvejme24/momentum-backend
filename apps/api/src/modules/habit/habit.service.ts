@@ -17,7 +17,9 @@ import type {
 } from '@momentum/types';
 import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
+import { assertCanAddHabit } from '../../lib/entitlements.js';
 import { prisma } from '../../lib/prisma.js';
+import { notifyHabitCreated } from '../notification/notification.events.js';
 
 const STREAK_LOOKBACK_DAYS = 400;
 const HISTORY_DAYS = 90;
@@ -177,6 +179,7 @@ export async function listHabits(userId: string, archived = false): Promise<Habi
 }
 
 export async function createHabit(userId: string, input: CreateHabitInput): Promise<HabitResponse> {
+  await assertCanAddHabit(userId);
   const prefs = await getUserPrefs(userId);
   assertStartDateNotFuture(input.startDate, prefs.timezone);
 
@@ -203,6 +206,8 @@ export async function createHabit(userId: string, input: CreateHabitInput): Prom
       sortOrder,
     },
   });
+
+  notifyHabitCreated(userId, habit.id, habit.title);
 
   return toPublicHabit(habit, 0);
 }
@@ -359,6 +364,10 @@ export async function restoreHabit(userId: string, habitId: string): Promise<Hab
 
   if (!existing) {
     throw AppError.notFound('Habit not found');
+  }
+
+  if (existing.archivedAt) {
+    await assertCanAddHabit(userId);
   }
 
   const habit = await prisma.habit.update({

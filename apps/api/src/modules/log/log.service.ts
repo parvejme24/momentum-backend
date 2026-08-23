@@ -20,6 +20,7 @@ import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { assertLoggableLocalDate, fromPrismaDate, toPrismaDate } from '../../utils/date-guard.js';
+import { notifyHabitCompleted } from '../notification/notification.events.js';
 
 const STREAK_LOOKBACK_DAYS = 400;
 const MAX_RANGE_DAYS = 400;
@@ -180,6 +181,16 @@ export async function upsertLog(
   const date = assertLoggableLocalDate(rawLocalDate, prefs.timezone, habit.startDate);
   const { status, value } = resolveStatusAndValue(habit, input);
 
+  const previous = await prisma.habitLog.findUnique({
+    where: {
+      habitId_localDate: {
+        habitId,
+        localDate: toPrismaDate(date),
+      },
+    },
+    select: { status: true },
+  });
+
   const row = await prisma.habitLog.upsert({
     where: {
       habitId_localDate: {
@@ -203,6 +214,15 @@ export async function upsertLog(
   });
 
   const streak = await computeStreakSnapshot(habit, userId, prefs);
+
+  if (status === 'DONE' && previous?.status !== 'DONE') {
+    notifyHabitCompleted(userId, {
+      habitId: habit.id,
+      title: habit.title,
+      localDate: date,
+      streak: streak.current,
+    });
+  }
 
   return {
     log: toLogEntry(row),
