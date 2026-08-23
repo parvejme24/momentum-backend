@@ -43,4 +43,35 @@ export async function registerUser(
   return { res, email, password, name };
 }
 
+export async function grantProAccess(
+  app: ReturnType<typeof createApp>,
+  userId: string,
+  input: {
+    planSlug?: 'pro-year' | 'pro-lifetime';
+    accessType?: 'timed' | 'lifetime';
+    days?: number;
+  } = {},
+) {
+  const adminEmail = `grant-admin-${Date.now()}-${Math.random()}@example.com`;
+  const { res: adminReg } = await registerUser(app, { email: adminEmail, name: 'Grant Admin' });
+  await prisma.user.update({
+    where: { id: adminReg.body.user.id as string },
+    data: { role: 'ADMIN' },
+  });
+
+  const planSlug = input.planSlug ?? 'pro-lifetime';
+  const accessType = input.accessType ?? 'lifetime';
+
+  const res = await request(app)
+    .post(`/v1/admin/users/${userId}/grant-access`)
+    .set('Authorization', `Bearer ${adminReg.body.accessToken as string}`)
+    .send({
+      planSlug,
+      accessType,
+      ...(input.days !== undefined ? { days: input.days } : {}),
+    });
+
+  return { res, adminEmail };
+}
+
 export { prisma, hashRefreshToken, request };

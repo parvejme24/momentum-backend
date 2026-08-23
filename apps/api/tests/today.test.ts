@@ -242,10 +242,10 @@ describe('GET /v1/today', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('issues exactly two Prisma queries with 20 habits and dense logs', async () => {
+  it('loads /today with one auth lookup, one user+habits query, and one batched log query', async () => {
     const { auth, userId, timezone } = await authHeaders('today-perf');
     const today = todayIn(timezone);
-    const start = addDays(today, -400);
+    const start = addDays(today, -50);
 
     const habitIds: string[] = [];
     for (let i = 0; i < 20; i += 1) {
@@ -261,8 +261,7 @@ describe('GET /v1/today', () => {
       habitIds.push(created.body.habit.id as string);
     }
 
-    // ~400 days × 20 habits is heavy; seed ~50 days × 20 = 1000 rows for density
-    // while still exercising the batch path. Query count is independent of row count.
+    // 50 days × 20 habits = 1000 rows — enough density to prove logs are batched.
     const rows: Array<{
       habitId: string;
       userId: string;
@@ -270,7 +269,7 @@ describe('GET /v1/today', () => {
       status: 'DONE';
     }> = [];
     for (const habitId of habitIds) {
-      for (let d = 0; d < 400; d += 1) {
+      for (let d = 0; d < 50; d += 1) {
         rows.push({
           habitId,
           userId,
@@ -279,9 +278,7 @@ describe('GET /v1/today', () => {
         });
       }
     }
-    for (let i = 0; i < rows.length; i += 1000) {
-      await prisma.habitLog.createMany({ data: rows.slice(i, i + 1000) });
-    }
+    await prisma.habitLog.createMany({ data: rows });
 
     const userSpy = vi.spyOn(prisma.user, 'findFirst');
     const logSpy = vi.spyOn(prisma.habitLog, 'findMany');
@@ -290,11 +287,11 @@ describe('GET /v1/today', () => {
       const res = await request(app).get('/v1/today').set(auth);
       expect(res.status).toBe(200);
       expect(res.body.habits).toHaveLength(20);
-      expect(userSpy).toHaveBeenCalledTimes(1);
+      expect(userSpy).toHaveBeenCalledTimes(2);
       expect(logSpy).toHaveBeenCalledTimes(1);
     } finally {
       userSpy.mockRestore();
       logSpy.mockRestore();
     }
-  }, 120_000);
+  }, 60_000);
 });

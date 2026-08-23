@@ -4,6 +4,7 @@ import {
   cleanupUsersByEmails,
   closeTestResources,
   createTestApp,
+  grantProAccess,
   prisma,
   registerUser,
   request,
@@ -17,10 +18,16 @@ function trackEmail(email: string) {
   return email;
 }
 
-async function authHeaders(prefix: string, timezone = 'Asia/Dhaka') {
+async function authHeaders(prefix: string, timezone = 'Asia/Dhaka', pro = true) {
   const email = trackEmail(`${prefix}-${Date.now()}@example.com`);
   const { res } = await registerUser(app, { email });
   expect(res.status).toBe(201);
+
+  const userId = res.body.user.id as string;
+  if (pro) {
+    const granted = await grantProAccess(app, userId);
+    expect(granted.res.status).toBe(201);
+  }
 
   if (timezone !== 'Asia/Dhaka') {
     const patched = await request(app)
@@ -32,7 +39,7 @@ async function authHeaders(prefix: string, timezone = 'Asia/Dhaka') {
 
   return {
     email,
-    userId: res.body.user.id as string,
+    userId,
     token: res.body.accessToken as string,
     auth: { Authorization: `Bearer ${res.body.accessToken}` },
     timezone,
@@ -41,6 +48,49 @@ async function authHeaders(prefix: string, timezone = 'Asia/Dhaka') {
 
 beforeAll(async () => {
   await prisma.$connect();
+
+  await prisma.plan.upsert({
+    where: { slug: 'pro-lifetime' },
+    update: {
+      limits: {
+        maxHabits: null,
+        heatmapDays: 364,
+        reminders: 'all_devices',
+        export: ['csv', 'json'],
+        sharedBoards: false,
+        adminSeats: 0,
+        stats: true,
+        ai: true,
+      },
+      status: 'PUBLISHED',
+    },
+    create: {
+      slug: 'pro-lifetime',
+      name: 'Pro — Lifetime',
+      blurb: 'Pro lifetime',
+      priceCents: 9900,
+      currency: 'USD',
+      interval: 'FOREVER',
+      intervalCount: 1,
+      seatBased: false,
+      highlighted: false,
+      sortOrder: 2,
+      status: 'PUBLISHED',
+      ctaLabel: 'Get Pro',
+      ctaHref: '/register',
+      limits: {
+        maxHabits: null,
+        heatmapDays: 364,
+        reminders: 'all_devices',
+        export: ['csv', 'json'],
+        sharedBoards: false,
+        adminSeats: 0,
+        stats: true,
+        ai: true,
+      },
+      publishedAt: new Date(),
+    },
+  });
 });
 
 afterAll(async () => {

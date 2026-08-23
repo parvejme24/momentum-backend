@@ -108,25 +108,24 @@ describe('pricing catalog', () => {
     expect(pro.status).toBe(201);
     trackPlan(pro.body.plan.id);
 
-    const team = await request(app)
+    const proLifetime = await request(app)
       .post('/v1/admin/pricing/plans')
       .set(auth)
       .send(
         planBody({
-          slug: `team-${Date.now()}`,
-          name: 'Team',
-          priceCents: 1200,
-          interval: 'month',
-          seatBased: true,
-          ctaLabel: 'Contact for Team',
-          features: ['Everything in Pro', 'Shared boards'],
-          limits: { sharedBoards: true, adminSeats: null },
+          slug: `pro-lifetime-${Date.now()}`,
+          name: 'Pro Lifetime',
+          priceCents: 9900,
+          interval: 'forever',
+          ctaLabel: 'Get lifetime Pro',
+          features: ['Unlimited habits', 'AI suggestions', 'Stats'],
+          limits: { maxHabits: null, heatmapDays: 364, stats: true, ai: true },
         }),
       );
-    expect(team.status).toBe(201);
-    trackPlan(team.body.plan.id);
+    expect(proLifetime.status).toBe(201);
+    trackPlan(proLifetime.body.plan.id);
 
-    for (const id of [free.body.plan.id, pro.body.plan.id, team.body.plan.id] as string[]) {
+    for (const id of [free.body.plan.id, pro.body.plan.id, proLifetime.body.plan.id] as string[]) {
       const published = await request(app).post(`/v1/admin/pricing/plans/${id}/publish`).set(auth);
       expect(published.status).toBe(200);
     }

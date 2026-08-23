@@ -476,15 +476,17 @@ npm run check:redis      # verify Redis connectivity
 
 <br>
 
-| Variable             | Notes                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------------------- |
-| `DATABASE_URL`       | Pooled connection — every normal query                                                    |
-| `DIRECT_URL`         | Direct connection, **migrations only**. A pooler can't hold the session lock Prisma needs |
-| `REDIS_URL`          | `rediss://` — two `s`, TLS required                                                       |
-| `JWT_ACCESS_SECRET`  | 32+ chars; the process refuses to boot otherwise                                          |
-| `JWT_REFRESH_SECRET` | Must differ from the access secret                                                        |
-| `CORS_ORIGINS`       | Comma-separated allowlist                                                                 |
-| `SMTP_*` · `VAPID_*` | Mail and web push                                                                         |
+| Variable                         | Notes                                                                                     |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                   | Pooled connection — every normal query                                                    |
+| `DIRECT_URL`                     | Direct connection, **migrations only**. A pooler can't hold the session lock Prisma needs |
+| `REDIS_URL`                      | `rediss://` — two `s`, TLS required                                                       |
+| `JWT_ACCESS_SECRET`              | 32+ chars; the process refuses to boot otherwise                                          |
+| `JWT_REFRESH_SECRET`             | Must differ from the access secret                                                        |
+| `CORS_ORIGINS`                   | Comma-separated allowlist                                                                 |
+| `SMTP_*` · `VAPID_*`             | Mail and web push                                                                         |
+| `SECRET_KEY` · `PUBLISHABLE_KEY` | Stripe secret (server) and publishable (browser). `STRIPE_*` aliases also work            |
+| `STRIPE_WEBHOOK_SECRET`          | From `stripe listen` / Dashboard — required for renewals                                  |
 
 Environment is parsed through Zod at boot and the process **exits** on failure. A container that dies in two seconds saying `JWT_ACCESS_SECRET — use at least 32 characters` beats one that starts fine and throws `undefined` on the first login at 2am.
 

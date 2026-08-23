@@ -18,6 +18,31 @@ function trackEmail(email: string) {
   return email;
 }
 
+function testGoogleToken(profile: {
+  sub: string;
+  email: string;
+  name?: string;
+  picture?: string | null;
+  emailVerified?: boolean;
+}) {
+  return `test:${Buffer.from(JSON.stringify(profile)).toString('base64url')}`;
+}
+
+async function waitForEmailToken(
+  userId: string,
+  type: 'VERIFY_EMAIL' | 'RESET_PASSWORD',
+): Promise<{ id: string } | null> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const row = await prisma.emailToken.findFirst({
+      where: { userId, type, usedAt: null },
+      select: { id: true },
+    });
+    if (row) return row;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return null;
+}
+
 beforeAll(async () => {
   await prisma.$connect();
 });
@@ -193,9 +218,7 @@ describe('auth', () => {
     const userId = registered.body.user.id as string;
     expect(registered.body.user.emailVerifiedAt).toBeNull();
 
-    const tokenRow = await prisma.emailToken.findFirst({
-      where: { userId, type: 'VERIFY_EMAIL', usedAt: null },
-    });
+    const tokenRow = await waitForEmailToken(userId, 'VERIFY_EMAIL');
     expect(tokenRow).toBeTruthy();
     if (!tokenRow) return;
 
@@ -254,5 +277,82 @@ describe('auth', () => {
       password: 'brandnewpass1',
     });
     expect(newLogin.status).toBe(200);
+  });
+
+  it('google login registers a passwordless user with profile fields', async () => {
+    const email = trackEmail(`google-new-${Date.now()}@example.com`);
+    const sub = `google-sub-${Date.now()}`;
+
+    const res = await request(app)
+      .post('/v1/auth/google')
+      .send({
+        credential: testGoogleToken({
+          sub,
+          email,
+          name: 'Google User',
+          picture: 'https://lh3.googleusercontent.com/a/photo.jpg',
+          emailVerified: true,
+        }),
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.accessToken).toEqual(expect.any(String));
+    expect(res.body.refreshToken).toEqual(expect.any(String));
+    expect(res.body.user.email).toBe(email);
+    expect(res.body.user.name).toBe('Google User');
+    expect(res.body.user.avatarUrl).toBe('https://lh3.googleusercontent.com/a/photo.jpg');
+    expect(res.body.user.emailVerifiedAt).not.toBeNull();
+
+    const oauth = await prisma.oAuthAccount.findUnique({
+      where: { provider_providerAccountId: { provider: 'google', providerAccountId: sub } },
+    });
+    expect(oauth).toBeTruthy();
+  });
+
+  it('google login signs in an existing linked account', async () => {
+    const email = trackEmail(`google-return-${Date.now()}@example.com`);
+    const sub = `google-sub-return-${Date.now()}`;
+    const token = testGoogleToken({
+      sub,
+      email,
+      name: 'Return User',
+      picture: null,
+      emailVerified: true,
+    });
+
+    const first = await request(app).post('/v1/auth/google').send({ idToken: token });
+    expect(first.status).toBe(200);
+
+    const second = await request(app).post('/v1/auth/google').send({ idToken: token });
+    expect(second.status).toBe(200);
+    expect(second.body.user.id).toBe(first.body.user.id);
+  });
+
+  it('google login links an existing email/password account', async () => {
+    const email = trackEmail(`google-link-${Date.now()}@example.com`);
+    await registerUser(app, { email, password: 'password123', name: 'Email User' });
+
+    const sub = `google-sub-link-${Date.now()}`;
+    const linked = await request(app)
+      .post('/v1/auth/google')
+      .send({
+        idToken: testGoogleToken({
+          sub,
+          email,
+          name: 'Email User',
+          picture: 'https://lh3.googleusercontent.com/a/linked.jpg',
+          emailVerified: true,
+        }),
+      });
+
+    expect(linked.status).toBe(200);
+    expect(linked.body.user.email).toBe(email);
+    expect(linked.body.user.avatarUrl).toBe('https://lh3.googleusercontent.com/a/linked.jpg');
+
+    const passwordLogin = await request(app).post('/v1/auth/login').send({
+      email,
+      password: 'password123',
+    });
+    expect(passwordLogin.status).toBe(200);
   });
 });
