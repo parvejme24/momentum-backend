@@ -39,6 +39,11 @@ export async function compare(_req: Request, res: Response): Promise<void> {
   res.status(200).json(result);
 }
 
+export async function packages(_req: Request, res: Response): Promise<void> {
+  const result = await pricingService.listPricingPackages();
+  res.status(200).json(result);
+}
+
 export async function listAdmin(req: Request, res: Response): Promise<void> {
   const query = req.query as unknown as ListAdminPlansQuery;
   const plans = await pricingService.listAdminPlans(query);

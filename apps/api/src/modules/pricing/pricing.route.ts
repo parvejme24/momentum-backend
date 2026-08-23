@@ -18,6 +18,7 @@ import {
 export const pricingRouter = Router();
 
 pricingRouter.get('/plans', asyncHandler(pricingController.listPublic));
+pricingRouter.get('/packages', asyncHandler(pricingController.packages));
 pricingRouter.get('/compare', asyncHandler(pricingController.compare));
 pricingRouter.get(
   '/plans/:slug',

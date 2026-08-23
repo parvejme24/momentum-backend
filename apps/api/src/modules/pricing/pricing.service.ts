@@ -6,6 +6,7 @@ import type {
   PlanInterval,
   PlanLimits,
   PlanStatus,
+  PricingPackage,
   PublicPlan,
   ReorderPlansInput,
   UpdatePlanInput,
@@ -20,7 +21,11 @@ import type {
   Prisma,
 } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
+import { buildCompareFeatureRows, buildPackageFeatures } from '../../lib/plan-feature-catalog.js';
+import { CATALOG_PLAN_SLUGS, isCatalogPlanSlug } from '../../lib/plan-catalog.js';
+import type { CatalogPlanSlug } from '../../lib/plan-catalog.js';
 import { prisma } from '../../lib/prisma.js';
+import { notifyAdminsPlanPublished } from '../notification/notification.events.js';
 
 const INTERVAL_TO_DB: Record<PlanInterval, DbInterval> = {
   one_time: 'ONE_TIME',
@@ -57,12 +62,18 @@ function parseLimits(value: Prisma.JsonValue): PlanLimits {
 }
 
 function toPublicPlan(plan: PlanWithFeatures): PublicPlan {
+  const limits = parseLimits(plan.limits);
+  const slug = plan.slug as CatalogPlanSlug;
+  const features = isCatalogPlanSlug(slug) ? buildPackageFeatures(slug, limits) : [];
+
   return {
     id: plan.id,
     slug: plan.slug,
     name: plan.name,
+    package: plan.name,
     blurb: plan.blurb,
     priceCents: plan.priceCents,
+    price: plan.priceCents / 100,
     currency: plan.currency,
     interval: INTERVAL_FROM_DB[plan.interval],
     intervalCount: plan.intervalCount,
@@ -70,8 +81,8 @@ function toPublicPlan(plan: PlanWithFeatures): PublicPlan {
     highlighted: plan.highlighted,
     ctaLabel: plan.ctaLabel,
     ctaHref: plan.ctaHref,
-    features: [...plan.features].sort((a, b) => a.sortOrder - b.sortOrder).map((f) => f.label),
-    limits: parseLimits(plan.limits),
+    features,
+    limits,
   };
 }
 
@@ -122,7 +133,7 @@ async function publishedCount(excludeId?: string): Promise<number> {
 
 async function hasActiveSubscribers(planId: string): Promise<boolean> {
   const count = await prisma.planSubscription.count({
-    where: { planId, status: 'ACTIVE' },
+    where: { planId, status: { in: ['ACTIVE', 'TRIALING', 'PAST_DUE'] } },
   });
   return count > 0;
 }
@@ -147,7 +158,7 @@ function replaceFeatures(planId: string, labels: string[]): Prisma.PlanFeatureCr
 
 export async function listPublishedPlans(): Promise<PublicPlan[]> {
   const plans = await prisma.plan.findMany({
-    where: { status: 'PUBLISHED' },
+    where: { status: 'PUBLISHED', slug: { in: [...CATALOG_PLAN_SLUGS] } },
     include: { features: { orderBy: { sortOrder: 'asc' } } },
     orderBy: { sortOrder: 'asc' },
   });
@@ -155,6 +166,8 @@ export async function listPublishedPlans(): Promise<PublicPlan[]> {
 }
 
 export async function getPublishedPlanBySlug(slug: string): Promise<PublicPlan> {
+  if (!isCatalogPlanSlug(slug)) throw AppError.notFound('Plan not found');
+
   const plan = await prisma.plan.findFirst({
     where: { slug, status: 'PUBLISHED' },
     include: { features: { orderBy: { sortOrder: 'asc' } } },
@@ -163,43 +176,46 @@ export async function getPublishedPlanBySlug(slug: string): Promise<PublicPlan> 
   return toPublicPlan(plan);
 }
 
-const COMPARE_ROWS: Array<{ key: keyof PlanLimits; label: string }> = [
-  { key: 'maxHabits', label: 'Habits' },
-  { key: 'heatmapDays', label: 'Heatmap history' },
-  { key: 'stats', label: 'Stats' },
-  { key: 'reminders', label: 'Reminders' },
-  { key: 'export', label: 'Export' },
-  { key: 'sharedBoards', label: 'Shared boards' },
-  { key: 'adminSeats', label: 'Admin seats' },
-];
-
-function formatLimitValue(key: keyof PlanLimits, limits: PlanLimits): string {
-  const value = limits[key];
-  if (value === undefined) return '—';
-  if (value === null) return 'Unlimited';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (Array.isArray(value)) return value.length === 0 ? '—' : value.join(', ').toUpperCase();
-  if (value === 'one_device') return '1 device';
-  if (value === 'all_devices') return 'All devices';
-  return String(value);
+export async function listPricingPackages(): Promise<PricingPackage[]> {
+  const plans = await listPublishedPlans();
+  return plans.map((plan) => ({
+    package: plan.package,
+    slug: plan.slug,
+    price: plan.price,
+    priceCents: plan.priceCents,
+    currency: plan.currency,
+    interval: plan.interval,
+    highlighted: plan.highlighted,
+    ctaLabel: plan.ctaLabel,
+    ctaHref: plan.ctaHref,
+    blurb: plan.blurb,
+    features: plan.features,
+  }));
 }
 
 export async function getCompareTable(): Promise<CompareResponse> {
   const plans = await prisma.plan.findMany({
-    where: { status: 'PUBLISHED' },
-    include: { features: { orderBy: { sortOrder: 'asc' } } },
+    where: { status: 'PUBLISHED', slug: { in: [...CATALOG_PLAN_SLUGS] } },
     orderBy: { sortOrder: 'asc' },
   });
 
+  const slugs = plans.map((plan) => plan.slug as CatalogPlanSlug);
+  const limitsBySlug = Object.fromEntries(
+    plans.map((plan) => [plan.slug, parseLimits(plan.limits)]),
+  );
+
   return {
-    plans: plans.map((p) => ({ slug: p.slug, name: p.name, highlighted: p.highlighted })),
-    rows: COMPARE_ROWS.map(({ key, label }) => ({
-      key,
-      label,
-      values: Object.fromEntries(
-        plans.map((p) => [p.slug, formatLimitValue(key, parseLimits(p.limits))]),
-      ),
+    plans: plans.map((plan) => ({
+      slug: plan.slug,
+      name: plan.name,
+      highlighted: plan.highlighted,
+      priceCents: plan.priceCents,
+      price: plan.priceCents / 100,
+      currency: plan.currency,
+      interval: INTERVAL_FROM_DB[plan.interval],
+      ctaLabel: plan.ctaLabel,
     })),
+    features: buildCompareFeatureRows(slugs, limitsBySlug),
   };
 }
 
@@ -356,7 +372,9 @@ export async function publishPlan(userId: string, id: string): Promise<AdminPlan
     });
   });
 
-  return toAdminPlan(plan);
+  const published = toAdminPlan(plan);
+  notifyAdminsPlanPublished(published.name, published.id);
+  return published;
 }
 
 export async function archivePlan(userId: string, id: string): Promise<AdminPlan> {
