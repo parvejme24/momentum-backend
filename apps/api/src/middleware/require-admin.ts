@@ -11,7 +11,7 @@ export const requireAdmin: RequestHandler = async (req, _res, next) => {
     }
 
     const user = await prisma.user.findFirst({
-      where: { id: userId, deletedAt: null },
+      where: { id: userId, deletedAt: null, bannedAt: null },
       select: { role: true },
     });
 

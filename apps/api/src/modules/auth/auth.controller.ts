@@ -1,6 +1,7 @@
 import type {
   ChangePasswordInput,
   ForgotPasswordInput,
+  GoogleLoginInput,
   LoginInput,
   LogoutInput,
   RefreshInput,
@@ -40,6 +41,12 @@ export async function register(req: Request, res: Response): Promise<void> {
 export async function login(req: Request, res: Response): Promise<void> {
   const body = req.body as LoginInput;
   const result = await authService.login(body, clientMeta(req));
+  res.status(200).json(result);
+}
+
+export async function googleLogin(req: Request, res: Response): Promise<void> {
+  const body = req.body as GoogleLoginInput;
+  const result = await authService.googleLogin(body.idToken, clientMeta(req));
   res.status(200).json(result);
 }
 

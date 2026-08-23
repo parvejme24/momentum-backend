@@ -6,11 +6,15 @@ type RequestTarget = 'body' | 'query' | 'params';
 
 function zodDetails(error: {
   issues: Array<{ path: PropertyKey[]; message: string }>;
-}): Array<{ field: string; issue: string }> {
-  return error.issues.map((issue) => ({
-    field: issue.path.length > 0 ? issue.path.map(String).join('.') : '_root',
-    issue: issue.message,
-  }));
+}): Array<{ field: string; issue: string; message: string }> {
+  return error.issues.map((issue) => {
+    const field = issue.path.length > 0 ? issue.path.map(String).join('.') : '_root';
+    return {
+      field,
+      issue: issue.message,
+      message: issue.message,
+    };
+  });
 }
 
 function replaceRequestProperty(req: Request, key: 'query' | 'params', value: unknown): void {

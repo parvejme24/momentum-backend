@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
+import { env } from './env.js';
 
-const BCRYPT_ROUNDS = 12;
+const BCRYPT_ROUNDS = env.NODE_ENV === 'production' ? 12 : 10;
 
 /** Precomputed bcrypt hash used to equalize login timing when no user/hash exists. */
 const DUMMY_PASSWORD_HASH = '$2b$12$v7LWIcujl3w8u544rkDH9.qPmTCc148dwtA.RqnZi0n4dCy8qaVYC';

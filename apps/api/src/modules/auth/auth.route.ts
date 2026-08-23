@@ -14,6 +14,7 @@ import {
   resetPasswordSchema,
   updateMeSchema,
   verifyEmailSchema,
+  googleLoginSchema,
 } from './auth.schema.js';
 
 export const authRouter = Router();
@@ -26,6 +27,13 @@ authRouter.post(
 );
 
 authRouter.post('/login', authRateLimit, validate(loginSchema), asyncHandler(authController.login));
+
+authRouter.post(
+  '/google',
+  authRateLimit,
+  validate(googleLoginSchema),
+  asyncHandler(authController.googleLogin),
+);
 
 authRouter.post(
   '/refresh',

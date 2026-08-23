@@ -11,9 +11,12 @@ import type {
 } from '@momentum/types';
 import { Prisma } from '../../generated/prisma/client.js';
 import type { EmailTokenType } from '../../generated/prisma/client.js';
+import { invalidateAuthStatus } from '../../lib/auth-cache.js';
 import { env } from '../../lib/env.js';
 import { AppError } from '../../lib/errors.js';
+import { verifyGoogleIdToken, type GoogleProfile } from '../../lib/google.js';
 import { signAccessToken } from '../../lib/jwt.js';
+import { logger } from '../../lib/logger.js';
 import {
   sendPasswordChangedEmail,
   sendPasswordResetEmail,
@@ -22,6 +25,11 @@ import {
 import { hashPassword, verifyPassword } from '../../lib/password.js';
 import { prisma } from '../../lib/prisma.js';
 import { generateRefreshToken, hashRefreshToken } from '../../lib/tokens.js';
+import {
+  notifyAdminsNewUser,
+  notifyEmailVerified,
+  notifyWelcome,
+} from '../notification/notification.events.js';
 
 const LOGIN_UNAUTHORIZED_MESSAGE = 'Invalid email or password';
 
@@ -38,6 +46,7 @@ type UserRow = {
   updatedAt: Date;
   passwordHash?: string | null;
   deletedAt?: Date | null;
+  bannedAt?: Date | null;
 };
 
 type RefreshMeta = {
@@ -55,6 +64,7 @@ function toPublicUser(user: UserRow): PublicUser {
     timezone: user.timezone,
     weekStartsOn: user.weekStartsOn,
     role: user.role === 'ADMIN' ? 'admin' : 'customer',
+    emailVerified: user.emailVerifiedAt !== null,
     emailVerifiedAt: user.emailVerifiedAt?.toISOString() ?? null,
     createdAt: user.createdAt.toISOString(),
     updatedAt: user.updatedAt.toISOString(),
@@ -99,6 +109,74 @@ async function revokeAllRefreshTokens(userId: string): Promise<void> {
   });
 }
 
+function touchLastActive(userId: string): void {
+  void prisma.user
+    .update({
+      where: { id: userId },
+      data: { lastActiveAt: new Date() },
+    })
+    .catch((err: unknown) => {
+      logger.warn({ err, userId }, 'Failed to update lastActiveAt');
+    });
+}
+
+function deferPostRegister(userId: string, email: string, name: string): void {
+  void (async () => {
+    try {
+      const verifyToken = await issueEmailToken(userId, 'VERIFY_EMAIL', VERIFY_EMAIL_TTL_MS);
+      sendVerificationEmail(email, name, verifyToken);
+      notifyWelcome(userId, name);
+      notifyAdminsNewUser({ userId, name, email });
+    } catch (err) {
+      logger.error({ err, userId }, 'Post-register side effects failed');
+    }
+  })();
+}
+
+function deferGoogleRegisterSideEffects(userId: string, name: string, email: string): void {
+  notifyWelcome(userId, name);
+  notifyAdminsNewUser({ userId, name, email });
+}
+
+async function syncGoogleProfile(user: UserRow, profile: GoogleProfile): Promise<UserRow> {
+  const data: Prisma.UserUpdateInput = {};
+
+  if (profile.picture && profile.picture !== user.avatarUrl) {
+    data.avatarUrl = profile.picture.slice(0, 500);
+  }
+
+  const nextName = profile.name.trim().slice(0, 60);
+  if (nextName && nextName !== user.name) {
+    data.name = nextName;
+  }
+
+  if (profile.emailVerified && !user.emailVerifiedAt) {
+    data.emailVerifiedAt = new Date();
+  }
+
+  if (Object.keys(data).length === 0) return user;
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data,
+  });
+
+  await invalidateAuthStatus(user.id);
+  return updated;
+}
+
+async function findUserForGoogle(profile: GoogleProfile) {
+  return prisma.oAuthAccount.findUnique({
+    where: {
+      provider_providerAccountId: {
+        provider: 'google',
+        providerAccountId: profile.sub,
+      },
+    },
+    include: { user: true },
+  });
+}
+
 const VERIFY_EMAIL_TTL_MS = 24 * 60 * 60 * 1000;
 const RESET_PASSWORD_TTL_MS = 60 * 60 * 1000;
 
@@ -136,6 +214,7 @@ async function consumeEmailToken(rawToken: string, type: EmailTokenType) {
     row.type !== type ||
     row.usedAt ||
     row.user.deletedAt ||
+    row.user.bannedAt ||
     row.expiresAt.getTime() <= Date.now()
   ) {
     throw AppError.validation('Check the highlighted fields', [
@@ -168,13 +247,14 @@ export async function register(
       },
     });
 
-    const verifyToken = await issueEmailToken(user.id, 'VERIFY_EMAIL', VERIFY_EMAIL_TTL_MS);
-    sendVerificationEmail(user.email, user.name, verifyToken);
+    deferPostRegister(user.id, user.email, user.name);
 
     return issueTokenPair(user, meta);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw new AppError('Email already registered', 409, 'CONFLICT');
+      throw new AppError('Email already registered', 409, 'CONFLICT', [
+        { field: 'email', issue: 'already registered', message: 'Email already registered' },
+      ]);
     }
     throw err;
   }
@@ -191,10 +271,72 @@ export async function login(input: LoginInput, meta: RefreshMeta = {}): Promise<
     throw new AppError(LOGIN_UNAUTHORIZED_MESSAGE, 401, 'UNAUTHORIZED');
   }
 
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastActiveAt: new Date() },
+  if (user.bannedAt) {
+    throw new AppError('This account has been banned', 403, 'ACCOUNT_BANNED');
+  }
+
+  touchLastActive(user.id);
+
+  return issueTokenPair(user, meta);
+}
+
+export async function googleLogin(idToken: string, meta: RefreshMeta = {}): Promise<AuthResponse> {
+  const profile = await verifyGoogleIdToken(idToken);
+  const linked = await findUserForGoogle(profile);
+
+  if (linked) {
+    const existing = linked.user;
+    if (existing.deletedAt) {
+      throw new AppError(LOGIN_UNAUTHORIZED_MESSAGE, 401, 'UNAUTHORIZED');
+    }
+    if (existing.bannedAt) {
+      throw new AppError('This account has been banned', 403, 'ACCOUNT_BANNED');
+    }
+
+    const user = await syncGoogleProfile(existing, profile);
+    touchLastActive(user.id);
+    return issueTokenPair(user, meta);
+  }
+
+  const byEmail = await prisma.user.findFirst({
+    where: { email: profile.email, deletedAt: null },
   });
+
+  if (byEmail) {
+    if (byEmail.bannedAt) {
+      throw new AppError('This account has been banned', 403, 'ACCOUNT_BANNED');
+    }
+
+    await prisma.oAuthAccount.create({
+      data: {
+        userId: byEmail.id,
+        provider: 'google',
+        providerAccountId: profile.sub,
+      },
+    });
+
+    const user = await syncGoogleProfile(byEmail, profile);
+    touchLastActive(user.id);
+    return issueTokenPair(user, meta);
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      email: profile.email,
+      name: profile.name.trim().slice(0, 60),
+      avatarUrl: profile.picture?.slice(0, 500) ?? null,
+      passwordHash: null,
+      ...(profile.emailVerified ? { emailVerifiedAt: new Date() } : {}),
+      accounts: {
+        create: {
+          provider: 'google',
+          providerAccountId: profile.sub,
+        },
+      },
+    },
+  });
+
+  deferGoogleRegisterSideEffects(user.id, user.name, user.email);
 
   return issueTokenPair(user, meta);
 }
@@ -212,6 +354,10 @@ export async function refresh(
 
   if (!existing || existing.user.deletedAt) {
     throw new AppError('Invalid refresh token', 401, 'UNAUTHORIZED');
+  }
+
+  if (existing.user.bannedAt) {
+    throw new AppError('This account has been banned', 403, 'ACCOUNT_BANNED');
   }
 
   if (existing.revokedAt) {
@@ -315,7 +461,7 @@ export async function forgotPassword(input: ForgotPasswordInput): Promise<void> 
   const user = await prisma.user.findFirst({
     where: { email: input.email, deletedAt: null },
   });
-  if (!user) return;
+  if (!user || user.bannedAt) return;
 
   const token = await issueEmailToken(user.id, 'RESET_PASSWORD', RESET_PASSWORD_TTL_MS);
   sendPasswordResetEmail(user.email, user.name, token);
@@ -347,6 +493,7 @@ export async function verifyEmail(input: VerifyEmailInput): Promise<void> {
     where: { id: user.id },
     data: { emailVerifiedAt: new Date() },
   });
+  notifyEmailVerified(user.id);
 }
 
 export async function resendVerification(userId: string): Promise<void> {

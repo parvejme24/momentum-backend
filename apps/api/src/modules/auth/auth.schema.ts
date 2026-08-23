@@ -8,4 +8,5 @@ export {
   forgotPasswordSchema,
   resetPasswordSchema,
   verifyEmailSchema,
+  googleLoginSchema,
 } from '@momentum/types';
