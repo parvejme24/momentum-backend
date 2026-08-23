@@ -43,23 +43,56 @@ export const updateMeSchema = z
     { message: 'At least one field is required' },
   );
 
-export const changePasswordSchema = z.object({
-  oldPassword: z.string().min(1),
-  newPassword: passwordSchema,
-});
+export const changePasswordSchema = z
+  .object({
+    oldPassword: z.string().min(1).optional(),
+    currentPassword: z.string().min(1).optional(),
+    newPassword: passwordSchema,
+  })
+  .transform((value) => ({
+    oldPassword: value.oldPassword ?? value.currentPassword ?? '',
+    newPassword: value.newPassword,
+  }))
+  .refine((value) => value.oldPassword.length > 0, {
+    message: 'is required',
+    path: ['oldPassword'],
+  });
 
 export const forgotPasswordSchema = z.object({
   email: emailSchema,
 });
 
-export const resetPasswordSchema = z.object({
-  token: z.string().min(1),
-  newPassword: passwordSchema,
-});
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().min(1),
+    newPassword: passwordSchema.optional(),
+    password: passwordSchema.optional(),
+  })
+  .transform((value) => ({
+    token: value.token,
+    newPassword: value.newPassword ?? value.password ?? '',
+  }))
+  .refine((value) => value.newPassword.length >= 8, {
+    message: 'Password must be at least 8 characters',
+    path: ['newPassword'],
+  });
 
 export const verifyEmailSchema = z.object({
   token: z.string().min(1),
 });
+
+export const googleLoginSchema = z
+  .object({
+    idToken: z.string().min(1).optional(),
+    credential: z.string().min(1).optional(),
+  })
+  .transform((value) => ({
+    idToken: value.idToken ?? value.credential ?? '',
+  }))
+  .refine((value) => value.idToken.length > 0, {
+    message: 'idToken or credential is required',
+    path: ['idToken'],
+  });
 
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -70,6 +103,7 @@ export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
+export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
 
 export type PublicUser = {
   id: string;
@@ -79,6 +113,7 @@ export type PublicUser = {
   timezone: string;
   weekStartsOn: number;
   role: 'admin' | 'customer';
+  emailVerified: boolean;
   emailVerifiedAt: string | null;
   createdAt: string;
   updatedAt: string;

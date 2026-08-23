@@ -15,12 +15,13 @@ export const planLimitsSchema = z
     sharedBoards: z.boolean().optional(),
     adminSeats: z.number().int().nonnegative().nullable().optional(),
     stats: z.boolean().optional(),
+    ai: z.boolean().optional(),
   })
   .strict();
 
 export const planSlugSchema = z
   .string()
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be URL-safe lowercase (e.g. pro, team-plus)');
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be URL-safe lowercase (e.g. pro-year, pro-lifetime)');
 
 const featureItemSchema = z.string().trim().min(1).max(120);
 
@@ -95,6 +96,26 @@ export type UpdatePlanInput = z.infer<typeof updatePlanSchema>;
 export type ListAdminPlansQuery = z.infer<typeof listAdminPlansQuerySchema>;
 export type ReorderPlansInput = z.infer<typeof reorderPlansSchema>;
 
+export type PackageFeature = {
+  /** When true, UI shows a check icon. When false, UI shows a close icon. */
+  isActive: boolean;
+  name: string;
+};
+
+export type PricingPackage = {
+  package: string;
+  slug: string;
+  price: number;
+  priceCents: number;
+  currency: string;
+  interval: PlanInterval;
+  highlighted: boolean;
+  ctaLabel: string;
+  ctaHref: string;
+  blurb: string;
+  features: PackageFeature[];
+};
+
 export type PublicPlan = {
   id: string;
   slug: string;
@@ -108,7 +129,9 @@ export type PublicPlan = {
   highlighted: boolean;
   ctaLabel: string;
   ctaHref: string;
-  features: string[];
+  price: number;
+  package: string;
+  features: PackageFeature[];
   limits: PlanLimits;
 };
 
@@ -129,13 +152,26 @@ export type UpdatePlanResponse = {
   message: string | null;
 };
 
-export type CompareRow = {
+export type PlanFeatureRow = {
   key: string;
   label: string;
-  values: Record<string, string>;
+  values: Record<string, PackageFeature>;
+};
+
+export type ComparePlanSummary = {
+  slug: string;
+  name: string;
+  highlighted: boolean;
+  priceCents: number;
+  price: number;
+  currency: string;
+  interval: PlanInterval;
+  ctaLabel: string;
 };
 
 export type CompareResponse = {
-  plans: Array<{ slug: string; name: string; highlighted: boolean }>;
-  rows: CompareRow[];
+  plans: ComparePlanSummary[];
+  features: PlanFeatureRow[];
 };
+
+export type PricingPackagesResponse = PricingPackage[];
