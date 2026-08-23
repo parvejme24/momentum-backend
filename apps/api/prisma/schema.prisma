@@ -56,7 +56,52 @@ enum PlanInterval {
 
 enum SubscriptionStatus {
   ACTIVE
+  TRIALING
+  PAST_DUE
   CANCELED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CARD
+  BANK_TRANSFER
+  CASH
+  MANUAL
+  OTHER
+}
+
+enum NotificationAudience {
+  USER
+  ADMIN
+}
+
+enum NotificationType {
+  WELCOME
+  EMAIL_VERIFIED
+  HABIT_CREATED
+  HABIT_COMPLETED
+  HABIT_STREAK
+  PAYMENT_SUCCEEDED
+  PAYMENT_FAILED
+  PAYMENT_REFUNDED
+  SUBSCRIPTION_STARTED
+  SUBSCRIPTION_RENEWED
+  SUBSCRIPTION_CANCELED
+  SUBSCRIPTION_PAST_DUE
+  USER_BANNED
+  USER_UNBANNED
+  PLAN_PUBLISHED
+  ADMIN_NEW_USER
+  ADMIN_NEW_PAYMENT
+  ADMIN_SUBSCRIPTION_CANCELED
+  ADMIN_USER_BANNED
 }
 
 model User {
@@ -75,6 +120,11 @@ model User {
   emailVerifiedAt DateTime?
   lastActiveAt    DateTime?
 
+  bannedAt     DateTime?
+  bannedReason String?   @db.VarChar(280)
+
+  stripeCustomerId String? @unique @db.VarChar(64)
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -88,8 +138,13 @@ model User {
   plansCreated       Plan[]             @relation("PlanCreatedBy")
   plansUpdated       Plan[]             @relation("PlanUpdatedBy")
   planSubscriptions  PlanSubscription[]
+  payments           Payment[]
+  paymentsRecorded   Payment[]          @relation("PaymentRecordedBy")
+  notifications      Notification[]
 
   @@index([deletedAt])
+  @@index([bannedAt])
+  @@index([role, deletedAt])
   @@map("users")
 }
 
@@ -284,6 +339,7 @@ model Plan {
   features      PlanFeature[]
   versions      PlanVersion[]
   subscriptions PlanSubscription[]
+  payments      Payment[]
 
   @@index([status, sortOrder])
   @@index([highlighted, status])
@@ -330,13 +386,84 @@ model PlanSubscription {
   planId String @db.Uuid
 
   status SubscriptionStatus @default(ACTIVE)
+  seats  Int                @default(1)
+
+  currentPeriodStart DateTime  @default(now())
+  currentPeriodEnd   DateTime?
+  canceledAt         DateTime?
+  trialEndsAt        DateTime?
+  notes              String?   @db.VarChar(500)
+
+  stripeSubscriptionId String? @unique @db.VarChar(64)
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan Plan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan     Plan      @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payments Payment[]
 
   @@index([planId, status])
-  @@index([userId])
+  @@index([userId, status])
+  @@index([status, currentPeriodEnd])
   @@map("plan_subscriptions")
+}
+
+model Payment {
+  id String @id @default(uuid()) @db.Uuid
+
+  userId         String  @db.Uuid
+  planId         String? @db.Uuid
+  subscriptionId String? @db.Uuid
+
+  amountCents Int
+  currency    String        @default("USD") @db.VarChar(3)
+  status      PaymentStatus @default(SUCCEEDED)
+  method      PaymentMethod @default(MANUAL)
+
+  provider    String? @db.VarChar(32)
+  providerRef String? @db.VarChar(255)
+  receiptUrl  String? @db.VarChar(500)
+  description String? @db.VarChar(280)
+  notes       String? @db.VarChar(500)
+
+  paidAt     DateTime  @default(now())
+  refundedAt DateTime?
+
+  recordedById String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan         Plan?             @relation(fields: [planId], references: [id], onDelete: SetNull)
+  subscription PlanSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  recordedBy   User?             @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerRef])
+  @@index([paidAt, status])
+  @@index([userId, paidAt])
+  @@index([planId, status])
+  @@index([status, method])
+  @@map("payments")
+}
+
+model Notification {
+  id     String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+
+  audience NotificationAudience
+  type     NotificationType
+  title    String               @db.VarChar(120)
+  body     String               @db.VarChar(280)
+  data     Json                 @default("{}")
+
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, audience, createdAt])
+  @@index([userId, audience, readAt])
+  @@map("notifications")
 }
