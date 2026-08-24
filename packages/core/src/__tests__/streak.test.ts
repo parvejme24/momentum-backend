@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { completionRate, daysSinceStart, isStreakAtRisk, streakFor } from '../streak.js';
+import {
+  completionRate,
+  daysSinceStart,
+  isStreakAtRisk,
+  longestStreak,
+  streakFor,
+} from '../streak.js';
 import type { HabitSchedule, LocalDate, LogStatus } from '../types.js';
 
 function logs(entries: Array<[LocalDate, LogStatus]>): Map<LocalDate, LogStatus> {
@@ -252,7 +258,126 @@ describe('streak', () => {
     expect(daysSinceStart(daily, '2026-07-01')).toBe(0);
   });
 
-  it('isStreakAtRisk detects live unmarked due streaks', () => {
+  it('longestStreak is one pass and at least the current streak', () => {
+    expect(longestStreak(daily, logs([]), '2026-08-10')).toBe(0);
+
+    expect(
+      longestStreak(
+        daily,
+        logs([
+          ['2026-08-08', 'DONE'],
+          ['2026-08-09', 'DONE'],
+          ['2026-08-10', 'DONE'],
+        ]),
+        '2026-08-10',
+      ),
+    ).toBe(3);
+
+    expect(
+      longestStreak(
+        daily,
+        logs([
+          ['2026-08-03', 'DONE'],
+          ['2026-08-04', 'DONE'],
+          ['2026-08-05', 'DONE'],
+          ['2026-08-07', 'DONE'],
+          ['2026-08-08', 'DONE'],
+        ]),
+        '2026-08-10',
+      ),
+    ).toBe(3);
+
+    const current = streakFor(
+      daily,
+      logs([
+        ['2026-08-09', 'DONE'],
+        ['2026-08-10', 'SKIPPED'],
+      ]),
+      '2026-08-10',
+    );
+    expect(
+      longestStreak(
+        daily,
+        logs([
+          ['2026-08-09', 'DONE'],
+          ['2026-08-10', 'SKIPPED'],
+        ]),
+        '2026-08-10',
+      ),
+    ).toBeGreaterThanOrEqual(current);
+  });
+
+  it('longestStreak walks non-due days and skips SKIPPED logs', () => {
+    expect(
+      longestStreak(
+        specific,
+        logs([
+          ['2026-08-03', 'DONE'], // Mon
+          ['2026-08-05', 'SKIPPED'], // Wed
+          ['2026-08-07', 'DONE'], // Fri
+          ['2026-08-10', 'DONE'], // Mon
+        ]),
+        '2026-08-10',
+      ),
+    ).toBe(3);
+  });
+
+  it('longestStreak for weekly schedules is one pass', () => {
+    expect(longestStreak({ ...weekly, targetPerWeek: null }, logs([]), '2026-08-10', 1)).toBe(0);
+    expect(longestStreak({ ...weekly, targetPerWeek: 0 }, logs([]), '2026-08-10', 1)).toBe(0);
+
+    expect(
+      longestStreak(
+        weekly,
+        logs([
+          ['2026-08-03', 'DONE'],
+          ['2026-08-04', 'DONE'],
+          ['2026-08-05', 'DONE'],
+          ['2026-08-10', 'DONE'],
+          ['2026-08-11', 'DONE'],
+          ['2026-08-12', 'DONE'],
+        ]),
+        '2026-08-12',
+        1,
+      ),
+    ).toBe(2);
+
+    // Broken week resets the chain; a later shorter run does not beat the record
+    expect(
+      longestStreak(
+        weekly,
+        logs([
+          ['2026-08-03', 'DONE'],
+          ['2026-08-04', 'DONE'],
+          ['2026-08-05', 'DONE'],
+          ['2026-08-10', 'DONE'],
+          ['2026-08-11', 'DONE'],
+          ['2026-08-12', 'DONE'],
+          ['2026-08-24', 'DONE'],
+          ['2026-08-25', 'DONE'],
+          ['2026-08-26', 'DONE'],
+        ]),
+        '2026-08-26',
+        1,
+      ),
+    ).toBe(2);
+
+    expect(
+      longestStreak(
+        weekly,
+        logs([
+          ['2026-08-03', 'DONE'],
+          ['2026-08-04', 'DONE'],
+          ['2026-08-05', 'DONE'],
+          ['2026-08-17', 'DONE'],
+        ]),
+        '2026-08-18',
+        1,
+      ),
+    ).toBe(1);
+  });
+
+  it('isStreakAtRisk when due today with a live streak', () => {
     expect(isStreakAtRisk(daily, logs([['2026-08-09', 'DONE']]), '2026-08-10')).toBe(true);
     expect(
       isStreakAtRisk(

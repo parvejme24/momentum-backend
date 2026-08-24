@@ -12,6 +12,22 @@ function weekStart(date: LocalDate, weekStartsOn: WeekStartsOn): LocalDate {
   return addDays(date, -offset);
 }
 
+function countCompletionsInWeek(
+  habit: HabitSchedule,
+  logs: Map<LocalDate, LogStatus>,
+  weekBegin: LocalDate,
+  today: LocalDate,
+): number {
+  let count = 0;
+  for (let i = 0; i < 7; i += 1) {
+    const date = addDays(weekBegin, i);
+    if (compareLocalDates(date, habit.startDate) < 0) continue;
+    if (compareLocalDates(date, today) > 0) continue;
+    if (isCompleted(logs.get(date))) count += 1;
+  }
+  return count;
+}
+
 function dailyStreak(
   habit: HabitSchedule,
   logs: Map<LocalDate, LogStatus>,
@@ -64,19 +80,7 @@ function weeklyStreak(
   let streak = 0;
   let weekCursor = weekStart(today, weekStartsOn);
 
-  const completionsInWeek = (start: LocalDate): number => {
-    let count = 0;
-    for (let i = 0; i < 7; i += 1) {
-      const date = addDays(start, i);
-      if (compareLocalDates(date, habit.startDate) < 0) continue;
-      if (compareLocalDates(date, today) > 0) continue;
-      if (isCompleted(logs.get(date))) count += 1;
-    }
-    return count;
-  };
-
-  // Current week may still be in progress — only count if target already met.
-  const currentCount = completionsInWeek(weekCursor);
+  const currentCount = countCompletionsInWeek(habit, logs, weekCursor, today);
   if (currentCount >= target) {
     streak += 1;
     weekCursor = addDays(weekCursor, -7);
@@ -91,7 +95,7 @@ function weeklyStreak(
     const weekEnd = addDays(weekCursor, 6);
     if (compareLocalDates(weekEnd, habit.startDate) < 0) break;
 
-    if (completionsInWeek(weekCursor) >= target) {
+    if (countCompletionsInWeek(habit, logs, weekCursor, today) >= target) {
       streak += 1;
       weekCursor = addDays(weekCursor, -7);
       continue;
@@ -185,4 +189,85 @@ export function isStreakAtRisk(
   if (!isDue(habit, today)) return false;
   if (logs.has(today)) return false;
   return streakFor(habit, logs, today, weekStartsOn) > 0;
+}
+
+function longestWeeklyStreak(
+  habit: HabitSchedule,
+  logs: Map<LocalDate, LogStatus>,
+  today: LocalDate,
+  weekStartsOn: WeekStartsOn,
+): number {
+  const target = habit.targetPerWeek ?? 0;
+  if (target < 1) return 0;
+
+  let longest = 0;
+  let current = 0;
+  let weekCursor = weekStart(habit.startDate, weekStartsOn);
+  const currentWeek = weekStart(today, weekStartsOn);
+
+  while (compareLocalDates(weekCursor, currentWeek) <= 0) {
+    const met = countCompletionsInWeek(habit, logs, weekCursor, today) >= target;
+    const inProgress = weekCursor === currentWeek;
+
+    if (met) {
+      current += 1;
+      if (current > longest) longest = current;
+    } else if (!inProgress) {
+      current = 0;
+    }
+
+    weekCursor = addDays(weekCursor, 7);
+  }
+
+  return longest;
+}
+
+function longestDailyStreak(
+  habit: HabitSchedule,
+  logs: Map<LocalDate, LogStatus>,
+  today: LocalDate,
+): number {
+  let longest = 0;
+  let current = 0;
+  let cursor = habit.startDate;
+
+  while (compareLocalDates(cursor, today) <= 0) {
+    if (!isDue(habit, cursor)) {
+      cursor = addDays(cursor, 1);
+      continue;
+    }
+
+    const status = logs.get(cursor);
+    if (status === 'SKIPPED') {
+      cursor = addDays(cursor, 1);
+      continue;
+    }
+
+    if (isCompleted(status)) {
+      current += 1;
+      if (current > longest) longest = current;
+    } else {
+      current = 0;
+    }
+
+    cursor = addDays(cursor, 1);
+  }
+
+  return longest;
+}
+
+/** Best completed chain in `[startDate, today]`. One pass — not N calls to `streakFor`. */
+export function longestStreak(
+  habit: HabitSchedule,
+  logs: Map<LocalDate, LogStatus>,
+  today: LocalDate,
+  weekStartsOn: number = 0,
+): number {
+  const weekStartDay = (weekStartsOn % 7) as WeekStartsOn;
+
+  if (habit.scheduleType === 'TIMES_PER_WEEK') {
+    return longestWeeklyStreak(habit, logs, today, weekStartDay);
+  }
+
+  return longestDailyStreak(habit, logs, today);
 }
