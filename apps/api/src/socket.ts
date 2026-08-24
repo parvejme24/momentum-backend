@@ -30,11 +30,20 @@ export async function setupSocket(httpServer: HttpServer): Promise<Server> {
     },
   });
 
-  const pubClient = createRedisClient();
+  const pubClient = createRedisClient({ enableOfflineQueue: true });
   const subClient = pubClient.duplicate();
 
-  await Promise.all([pubClient.ping(), subClient.ping()]);
-  io.adapter(createAdapter(pubClient, subClient));
+  try {
+    await Promise.race([
+      Promise.all([pubClient.ping(), subClient.ping()]),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Redis ping timed out')), 4000);
+      }),
+    ]);
+    io.adapter(createAdapter(pubClient, subClient));
+  } catch (err) {
+    logger.error({ err }, 'Redis adapter unavailable; Socket.IO will run on this instance only');
+  }
 
   io.use((socket, next) => {
     void (async () => {

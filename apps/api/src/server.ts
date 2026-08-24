@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import type { Server } from 'socket.io';
 import { createApp } from './app.js';
 import { env } from './lib/env.js';
 import { logger } from './lib/logger.js';
@@ -8,11 +9,17 @@ import { setupSocket } from './socket.js';
 async function main() {
   const app = createApp();
   const httpServer = createServer(app);
-  const io = await setupSocket(httpServer);
 
   httpServer.listen(env.PORT, () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Momentum API listening');
   });
+
+  let io: Server | undefined;
+  try {
+    io = await setupSocket(httpServer);
+  } catch (err) {
+    logger.error({ err }, 'Socket.IO unavailable; HTTP API is still up');
+  }
 
   let shuttingDown = false;
 
@@ -29,9 +36,12 @@ async function main() {
       });
     });
 
-    await new Promise<void>((resolve) => {
-      void io.close(() => resolve());
-    });
+    if (io) {
+      const socketServer = io;
+      await new Promise<void>((resolve) => {
+        void socketServer.close(() => resolve());
+      });
+    }
     await redis.quit();
 
     logger.info('Shutdown complete');

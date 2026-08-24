@@ -31,11 +31,15 @@ import { adminAiRouter } from './modules/ai/ai-prompt.route.js';
 import * as billingController from './modules/billing/billing.controller.js';
 import { asyncHandler } from './utils/async-handler.js';
 import { apiRouter } from './routes.js';
+import { live, ready } from './modules/health/health.route.js';
+
+const LIVE_PATHS = new Set(['/health', '/v1/health', '/api/health', '/ready', '/api/ready']);
 
 export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
+  app.set('trust proxy', 1);
   app.use(helmet());
   app.use(
     cors({
@@ -43,6 +47,10 @@ export function createApp() {
       credentials: true,
     }),
   );
+
+  app.get('/health', live);
+  app.get('/v1/health', live);
+  app.get('/ready', asyncHandler(ready));
 
   app.post(
     '/v1/billing/webhook',
@@ -60,7 +68,12 @@ export function createApp() {
   app.use(
     pinoHttp({
       logger,
-      autoLogging: env.NODE_ENV !== 'test',
+      autoLogging:
+        env.NODE_ENV === 'test'
+          ? false
+          : {
+              ignore: (req) => LIVE_PATHS.has(req.url?.split('?')[0] ?? ''),
+            },
     }),
   );
 
