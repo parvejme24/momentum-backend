@@ -44,11 +44,18 @@ const STATUS_FROM_DB: Record<DbStatus, AiPromptStatus> = {
   ARCHIVED: 'archived',
 };
 
+const PROMPT_CACHE_TTL_MS = 30_000;
+const promptCache = new Map<AiPromptFeature, { expiresAt: number; value: ResolvedAiPrompt }>();
+
 export type ResolvedAiPrompt = {
   slug: string;
   body: string;
   source: 'admin' | 'default';
 };
+
+function invalidatePromptCache(): void {
+  promptCache.clear();
+}
 
 function toAdminPrompt(row: AiPrompt): AdminAiPrompt {
   return {
@@ -71,17 +78,26 @@ export function interpolatePrompt(template: string, vars: Record<string, string>
 }
 
 export async function resolvePrompt(feature: AiPromptFeature): Promise<ResolvedAiPrompt> {
+  if (process.env.NODE_ENV !== 'test') {
+    const hit = promptCache.get(feature);
+    if (hit && hit.expiresAt > Date.now()) return hit.value;
+  }
+
   const published = await prisma.aiPrompt.findFirst({
     where: { feature: FEATURE_TO_DB[feature], status: 'PUBLISHED' },
     orderBy: [{ publishedAt: 'desc' }, { updatedAt: 'desc' }],
   });
 
+  let value: ResolvedAiPrompt;
   if (published) {
-    return { slug: published.slug, body: published.body, source: 'admin' };
+    value = { slug: published.slug, body: published.body, source: 'admin' };
+  } else {
+    const fallback = defaultPromptFor(feature);
+    value = { slug: fallback.slug, body: fallback.body, source: 'default' };
   }
 
-  const fallback = defaultPromptFor(feature);
-  return { slug: fallback.slug, body: fallback.body, source: 'default' };
+  promptCache.set(feature, { expiresAt: Date.now() + PROMPT_CACHE_TTL_MS, value });
+  return value;
 }
 
 export async function listPublishedFeatures(): Promise<AiFeatureCard[]> {
@@ -162,6 +178,7 @@ export async function createPrompt(
       updatedById: userId,
     },
   });
+  invalidatePromptCache();
   return toAdminPrompt(created);
 }
 
@@ -187,6 +204,7 @@ export async function updatePrompt(
       updatedById: userId,
     },
   });
+  invalidatePromptCache();
   return toAdminPrompt(updated);
 }
 
@@ -213,6 +231,7 @@ export async function publishPrompt(userId: string, id: string): Promise<AdminAi
     });
   });
 
+  invalidatePromptCache();
   return toAdminPrompt(published);
 }
 
@@ -222,6 +241,7 @@ export async function archivePrompt(userId: string, id: string): Promise<AdminAi
     where: { id },
     data: { status: 'ARCHIVED', publishedAt: null, updatedById: userId },
   });
+  invalidatePromptCache();
   return toAdminPrompt(archived);
 }
 
@@ -231,4 +251,5 @@ export async function deletePrompt(id: string): Promise<void> {
     throw AppError.conflict('Archive the prompt before deleting it');
   }
   await prisma.aiPrompt.delete({ where: { id } });
+  invalidatePromptCache();
 }

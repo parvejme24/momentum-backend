@@ -7,7 +7,7 @@ import {
 } from '@momentum/types';
 import { Router } from 'express';
 import { requireAuth } from '../../middleware/auth.js';
-import { aiWriteRateLimit } from '../../middleware/rate-limit.js';
+import { aiSuggestionsRateLimit, aiWriteRateLimit } from '../../middleware/rate-limit.js';
 import { validate } from '../../middleware/validate.js';
 import { asyncHandler } from '../../utils/async-handler.js';
 import * as aiController from './ai.controller.js';
@@ -21,7 +21,7 @@ aiRouter.get('/features', asyncHandler(aiController.features));
 
 aiRouter.post(
   '/suggestions',
-  aiWriteRateLimit,
+  aiSuggestionsRateLimit,
   validate(aiSuggestionsSchema),
   asyncHandler(aiController.suggestions),
 );

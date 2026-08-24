@@ -576,7 +576,7 @@ function fallbackCreateHabit(goal: string, startDate: string): AiCreatedHabitDra
     scheduleDays: [],
     targetPerWeek: null,
     intervalDays: null,
-    icon: 'check',
+    icon: '📖',
     color: '#2B4CE0',
     startDate,
   };
