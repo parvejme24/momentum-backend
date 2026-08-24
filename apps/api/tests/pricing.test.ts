@@ -70,65 +70,88 @@ afterAll(async () => {
 });
 
 describe('pricing catalog', () => {
-  it('seeds three published plans via admin; public list hides drafts', async () => {
+  it('public list only shows published catalog plans; drafts stay hidden', async () => {
     const { auth } = await adminAuth('price-seed');
 
-    const free = await request(app)
+    await prisma.plan.upsert({
+      where: { slug: 'free' },
+      update: { status: 'PUBLISHED', priceCents: 0, interval: 'FOREVER' },
+      create: {
+        slug: 'free',
+        name: 'Free',
+        blurb: 'Limited habits and features.',
+        priceCents: 0,
+        currency: 'USD',
+        interval: 'FOREVER',
+        intervalCount: 1,
+        seatBased: false,
+        highlighted: false,
+        sortOrder: 0,
+        status: 'PUBLISHED',
+        ctaLabel: 'Start free',
+        ctaHref: '/register',
+        limits: { maxHabits: 20 },
+        publishedAt: new Date(),
+      },
+    });
+    await prisma.plan.upsert({
+      where: { slug: 'pro-year' },
+      update: { status: 'PUBLISHED', interval: 'YEAR' },
+      create: {
+        slug: 'pro-year',
+        name: 'Pro Year',
+        blurb: 'Unlimited habits for a year.',
+        priceCents: 4900,
+        currency: 'USD',
+        interval: 'YEAR',
+        intervalCount: 1,
+        seatBased: false,
+        highlighted: true,
+        sortOrder: 1,
+        status: 'PUBLISHED',
+        ctaLabel: 'Get Pro',
+        ctaHref: '/register',
+        limits: { maxHabits: null, stats: true, ai: true },
+        publishedAt: new Date(),
+      },
+    });
+    await prisma.plan.upsert({
+      where: { slug: 'pro-lifetime' },
+      update: { status: 'PUBLISHED', interval: 'FOREVER' },
+      create: {
+        slug: 'pro-lifetime',
+        name: 'Pro Lifetime',
+        blurb: 'Pay once, keep Pro.',
+        priceCents: 9900,
+        currency: 'USD',
+        interval: 'FOREVER',
+        intervalCount: 1,
+        seatBased: false,
+        highlighted: false,
+        sortOrder: 2,
+        status: 'PUBLISHED',
+        ctaLabel: 'Get lifetime Pro',
+        ctaHref: '/register',
+        limits: { maxHabits: null, stats: true, ai: true },
+        publishedAt: new Date(),
+      },
+    });
+
+    const extra = await request(app)
       .post('/v1/admin/pricing/plans')
       .set(auth)
       .send(
         planBody({
-          slug: `free-${Date.now()}`,
-          name: 'Free',
-          priceCents: 0,
-          interval: 'forever',
-          ctaLabel: 'Start free',
-          features: ['3 habits', '90-day heatmap'],
-          limits: { maxHabits: 3, heatmapDays: 90, export: ['csv'] },
+          slug: `extra-${Date.now()}`,
+          name: 'Internal Extra',
         }),
       );
-    expect(free.status).toBe(201);
-    trackPlan(free.body.plan.id);
-
-    const pro = await request(app)
-      .post('/v1/admin/pricing/plans')
-      .set(auth)
-      .send(
-        planBody({
-          slug: `pro-${Date.now()}`,
-          name: 'Pro',
-          priceCents: 600,
-          interval: 'month',
-          highlighted: true,
-          ctaLabel: 'Start with Pro',
-          features: ['Unlimited habits', '364-day year chain'],
-          limits: { maxHabits: null, heatmapDays: 364, stats: true },
-        }),
-      );
-    expect(pro.status).toBe(201);
-    trackPlan(pro.body.plan.id);
-
-    const proLifetime = await request(app)
-      .post('/v1/admin/pricing/plans')
-      .set(auth)
-      .send(
-        planBody({
-          slug: `pro-lifetime-${Date.now()}`,
-          name: 'Pro Lifetime',
-          priceCents: 9900,
-          interval: 'forever',
-          ctaLabel: 'Get lifetime Pro',
-          features: ['Unlimited habits', 'AI suggestions', 'Stats'],
-          limits: { maxHabits: null, heatmapDays: 364, stats: true, ai: true },
-        }),
-      );
-    expect(proLifetime.status).toBe(201);
-    trackPlan(proLifetime.body.plan.id);
-
-    for (const id of [free.body.plan.id, pro.body.plan.id, proLifetime.body.plan.id] as string[]) {
-      const published = await request(app).post(`/v1/admin/pricing/plans/${id}/publish`).set(auth);
-      expect(published.status).toBe(200);
-    }
+    expect(extra.status).toBe(201);
+    trackPlan(extra.body.plan.id);
+    expect(
+      (await request(app).post(`/v1/admin/pricing/plans/${extra.body.plan.id}/publish`).set(auth))
+        .status,
+    ).toBe(200);
 
     const draft = await request(app)
       .post('/v1/admin/pricing/plans')
@@ -140,8 +163,8 @@ describe('pricing catalog', () => {
     const publicList = await request(app).get('/v1/pricing/plans');
     expect(publicList.status).toBe(200);
     const slugs = publicList.body.plans.map((p: { slug: string }) => p.slug);
-    expect(slugs).toContain(free.body.plan.slug);
-    expect(slugs).toContain(pro.body.plan.slug);
+    expect(slugs).toEqual(expect.arrayContaining(['free', 'pro-year', 'pro-lifetime']));
+    expect(slugs).not.toContain(extra.body.plan.slug);
     expect(slugs).not.toContain(draft.body.plan.slug);
 
     const hidden = await request(app).get(`/v1/pricing/plans/${draft.body.plan.slug}`);

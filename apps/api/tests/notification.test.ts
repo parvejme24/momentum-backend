@@ -11,7 +11,6 @@ import {
 
 const app = createTestApp();
 const emails: string[] = [];
-const planIds: string[] = [];
 
 function trackEmail(email: string) {
   emails.push(email);
@@ -60,11 +59,6 @@ async function waitForNotifications(
 }
 
 afterAll(async () => {
-  if (planIds.length > 0) {
-    await prisma.payment.deleteMany({ where: { planId: { in: planIds } } });
-    await prisma.planSubscription.deleteMany({ where: { planId: { in: planIds } } });
-    await prisma.plan.deleteMany({ where: { id: { in: planIds } } });
-  }
   await cleanupUsersByEmails(emails);
   await closeTestResources();
 });
@@ -114,30 +108,45 @@ describe('notifications', () => {
       body.notifications.some((n) => n.data.email === customer.email),
     );
 
-    const plan = await request(app)
-      .post('/v1/admin/pricing/plans')
-      .set(admin.auth)
-      .send({
-        slug: `n-plan-${Date.now()}`,
+    const plan = await prisma.plan.upsert({
+      where: { slug: 'pro-year' },
+      update: {
+        status: 'PUBLISHED',
+        priceCents: 600,
+        interval: 'YEAR',
+        limits: { maxHabits: null, stats: true, ai: true },
+      },
+      create: {
+        slug: 'pro-year',
         name: 'Notify Pro',
         blurb: 'Used by notification tests.',
         priceCents: 600,
-        interval: 'month',
-        features: ['Unlimited'],
-        limits: {},
-      });
-    expect(plan.status).toBe(201);
-    planIds.push(plan.body.plan.id);
-    await request(app).post(`/v1/admin/pricing/plans/${plan.body.plan.id}/publish`).set(admin.auth);
+        currency: 'USD',
+        interval: 'YEAR',
+        intervalCount: 1,
+        seatBased: false,
+        highlighted: true,
+        sortOrder: 1,
+        status: 'PUBLISHED',
+        ctaLabel: 'Get Pro',
+        ctaHref: '/register',
+        limits: { maxHabits: null, stats: true, ai: true },
+        publishedAt: new Date(),
+      },
+    });
 
     const { fulfillCheckout } = await import('../src/modules/billing/billing.service.js');
     await fulfillCheckout({
       sessionId: `cs_notify_${Date.now()}`,
+      provider: 'stripe',
+      customerId: `cus_notify_${Date.now()}`,
+      stripeSubscriptionId: `sub_notify_${Date.now()}`,
       amountCents: 600,
       currency: 'usd',
       userId: customer.userId,
-      planId: plan.body.plan.id,
+      planId: plan.id,
       seats: 1,
+      paymentMethod: 'CARD',
     });
 
     await waitForNotifications(
