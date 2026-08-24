@@ -11,6 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,
+    "types": ["node"],
 
     "strict": true,
     "noUncheckedIndexedAccess": true,
