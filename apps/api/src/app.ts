@@ -27,6 +27,7 @@ import {
   notificationRouter,
 } from './modules/notification/notification.route.js';
 import { aiRouter } from './modules/ai/ai.route.js';
+import { adminAiRouter } from './modules/ai/ai-prompt.route.js';
 import * as billingController from './modules/billing/billing.controller.js';
 import { asyncHandler } from './utils/async-handler.js';
 import { apiRouter } from './routes.js';
@@ -82,6 +83,7 @@ export function createApp() {
   app.use('/v1/billing', billingRouter);
   app.use('/v1/media', mediaRouter);
   app.use('/v1/ai', aiRouter);
+  app.use('/v1/admin/ai', adminAiRouter);
   app.use('/v1/notifications', notificationRouter);
   app.use('/v1/admin/users', adminUserRouter);
   app.use('/v1/admin/subscriptions', adminSubscriptionRouter);

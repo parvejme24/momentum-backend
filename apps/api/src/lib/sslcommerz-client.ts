@@ -127,7 +127,7 @@ export async function initSslCommerzSession(input: {
 
   return {
     gatewayUrl: payload.GatewayPageURL,
-    sessionKey: payload.sessionkey,
+    ...(payload.sessionkey ? { sessionKey: payload.sessionkey } : {}),
   };
 }
 

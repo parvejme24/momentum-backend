@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 
+import { DEFAULT_AI_PROMPTS } from '../src/modules/ai/ai-prompt.defaults.js';
 import { prisma } from '../src/lib/prisma.js';
 import { CATALOG_PLAN_SLUGS } from '../src/lib/plan-catalog.js';
 
@@ -214,6 +215,41 @@ async function archiveNonCatalogPlans() {
   });
 }
 
+async function seedAiPrompts() {
+  const featureToDb = {
+    chat: 'CHAT',
+    generate_habit: 'GENERATE_HABIT',
+    create_habit: 'CREATE_HABIT',
+    suggestions: 'SUGGESTIONS',
+    habit_message: 'HABIT_MESSAGE',
+  } as const;
+
+  for (const prompt of DEFAULT_AI_PROMPTS) {
+    await prisma.aiPrompt.upsert({
+      where: { slug: prompt.slug },
+      update: {
+        name: prompt.name,
+        description: prompt.description,
+        feature: featureToDb[prompt.feature],
+        body: prompt.body,
+        sortOrder: prompt.sortOrder,
+        status: 'PUBLISHED',
+        publishedAt: new Date(),
+      },
+      create: {
+        slug: prompt.slug,
+        name: prompt.name,
+        description: prompt.description,
+        feature: featureToDb[prompt.feature],
+        body: prompt.body,
+        sortOrder: prompt.sortOrder,
+        status: 'PUBLISHED',
+        publishedAt: new Date(),
+      },
+    });
+  }
+}
+
 async function main() {
   await seedDemoUsers();
   await archiveNonCatalogPlans();
@@ -221,6 +257,8 @@ async function main() {
   for (const plan of SEED_PLANS) {
     await seedPlan(plan);
   }
+
+  await seedAiPrompts();
 }
 
 main()

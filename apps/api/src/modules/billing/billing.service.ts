@@ -584,7 +584,7 @@ export async function confirmCheckout(
   if (input.provider === 'sslcommerz') {
     return confirmSslCommerzCheckout(userId, {
       tranId: input.tranId,
-      valId: input.valId,
+      ...(input.valId ? { valId: input.valId } : {}),
     });
   }
 

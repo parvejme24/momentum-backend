@@ -1,13 +1,22 @@
 import type {
+  AiChatInput,
+  AiChatResponse,
+  AiCreateHabitInput,
+  AiCreateHabitResponse,
+  AiCreatedHabitDraft,
+  AiFeaturesResponse,
   AiHabitIdeasInput,
   AiHabitIdeasResponse,
   AiHabitMessageInput,
   AiHabitMessageResponse,
+  AiPromptFeature,
   AiSuggestionsInput,
   AiSuggestionsResponse,
   AiStatusResponse,
 } from '@momentum/types';
 import {
+  geminiChatJsonSchema,
+  geminiCreateHabitJsonSchema,
   geminiHabitIdeasJsonSchema,
   geminiHabitMessageJsonSchema,
   geminiSuggestionsJsonSchema,
@@ -27,6 +36,7 @@ import { AppError } from '../../lib/errors.js';
 import { generateGeminiJson, isGeminiConfigured } from '../../lib/gemini.js';
 import { prisma } from '../../lib/prisma.js';
 import { fromPrismaDate, toPrismaDate } from '../../utils/date-guard.js';
+import { interpolatePrompt, listPublishedFeatures, resolvePrompt } from './ai-prompt.service.js';
 
 const STREAK_LOOKBACK_DAYS = 120;
 
@@ -66,6 +76,36 @@ async function getUserPrefs(userId: string): Promise<UserPrefs> {
   return user;
 }
 
+async function composePrompt(
+  feature: AiPromptFeature,
+  vars: Record<string, string>,
+  outputSpec: string,
+): Promise<{ prompt: string; promptSlug: string }> {
+  const resolved = await resolvePrompt(feature);
+  return {
+    promptSlug: resolved.slug,
+    prompt: `${interpolatePrompt(resolved.body, vars).trim()}\n\n${outputSpec.trim()}`,
+  };
+}
+
+async function loadHabitList(userId: string, take = 20): Promise<string> {
+  const habits = await prisma.habit.findMany({
+    where: { userId, archivedAt: null },
+    orderBy: { sortOrder: 'asc' },
+    take,
+    select: { title: true, type: true, scheduleType: true },
+  });
+  if (habits.length === 0) return 'No habits yet.';
+  return habits
+    .map((habit) => `- ${habit.title} (${habit.type}, ${habit.scheduleType})`)
+    .join('\n');
+}
+
+export async function getAiFeatures(): Promise<AiFeaturesResponse> {
+  const features = await listPublishedFeatures();
+  return { features };
+}
+
 export async function getAiStatus(userId: string): Promise<AiStatusResponse> {
   const entitlements = await resolveUserEntitlements(userId);
   return {
@@ -95,33 +135,36 @@ export async function getSuggestions(
   });
 
   const today = todayIn(user?.timezone ?? 'Asia/Dhaka');
-  const habitSummary =
+  const habitsText =
     habits.length === 0
       ? 'No habits yet.'
       : habits.map((habit) => `- ${habit.title} (${habit.type}, ${habit.scheduleType})`).join('\n');
 
-  const geminiPrompt = `You are a personal habit coach inside the Momentum app.
-User name: ${user?.name ?? 'there'}
-Today (user timezone): ${today}
-Focus: ${input.focus}
-User prompt: ${input.prompt?.trim() ?? 'none'}
-Current habits:
-${habitSummary}
-
-Return JSON only:
+  const { prompt, promptSlug } = await composePrompt(
+    'suggestions',
+    {
+      userName: user?.name ?? 'there',
+      today,
+      focus: input.focus,
+      prompt: input.prompt?.trim() ?? 'none',
+      habits: habitsText,
+    },
+    `Return JSON only:
 {
   "suggestions": [
     { "title": "short headline", "body": "1-2 sentences", "category": "habit|schedule|motivation|recovery" }
   ]
 }
-Provide 2-4 practical suggestions. No markdown.`;
+Provide 2-4 practical suggestions. No markdown.`,
+  );
 
-  const gemini = await generateGeminiJson(geminiPrompt, geminiSuggestionsJsonSchema);
+  const gemini = await generateGeminiJson(prompt, geminiSuggestionsJsonSchema);
   if (gemini) {
     return {
       suggestions: gemini.suggestions,
       planSlug: entitlements.planSlug,
       source: 'gemini',
+      promptSlug,
     };
   }
 
@@ -129,6 +172,7 @@ Provide 2-4 practical suggestions. No markdown.`;
     suggestions: fallbackSuggestions(habits, input, today),
     planSlug: entitlements.planSlug,
     source: 'fallback',
+    promptSlug,
   };
 }
 
@@ -209,14 +253,16 @@ export async function getHabitIdeas(
   const goal = input.goal?.trim() ?? 'build better daily routines';
   const interests = input.interests?.trim() ?? 'general wellness';
 
-  const prompt = `You are a habit coach for the Momentum app.
-User: ${user?.name ?? 'there'}
-Goal: ${goal}
-Interests: ${interests}
-Existing habits (avoid duplicates): ${existingTitles}
-Generate exactly ${input.count} NEW personal habit ideas.
-
-Return JSON only:
+  const { prompt, promptSlug } = await composePrompt(
+    'generate_habit',
+    {
+      userName: user?.name ?? 'there',
+      goal,
+      interests,
+      habits: existingTitles,
+      count: String(input.count),
+    },
+    `Return JSON only:
 {
   "ideas": [
     {
@@ -229,7 +275,9 @@ Return JSON only:
       "icon": "single emoji"
     }
   ]
-}`;
+}
+Generate exactly ${input.count} NEW personal habit ideas.`,
+  );
 
   const gemini = await generateGeminiJson(prompt, geminiHabitIdeasJsonSchema);
   if (gemini) {
@@ -237,6 +285,7 @@ Return JSON only:
       ideas: gemini.ideas.slice(0, input.count),
       planSlug: entitlements.planSlug,
       source: 'gemini',
+      promptSlug,
     };
   }
 
@@ -244,6 +293,7 @@ Return JSON only:
     ideas: fallbackHabitIdeas(input, goal),
     planSlug: entitlements.planSlug,
     source: 'fallback',
+    promptSlug,
   };
 }
 
@@ -308,15 +358,18 @@ export async function getHabitMessage(
   const currentStreak = streakFor(schedule, map, today, prefs.weekStartsOn);
   const loggedToday = map.has(today);
 
-  const prompt = `You are a warm, concise habit coach in the Momentum app.
-Write ONE short message (max 240 characters) for the user about their habit.
-Habit: "${habit.title}" (${habit.type}, ${habit.scheduleType})
-Context: ${input.context}
-Current streak: ${currentStreak} days
-Logged today: ${loggedToday ? 'yes' : 'no'}
-Tone: encouraging, specific, no guilt. No hashtags.
-
-Return JSON only: { "message": "your message here" }`;
+  const { prompt, promptSlug } = await composePrompt(
+    'habit_message',
+    {
+      habitTitle: habit.title,
+      habitType: habit.type,
+      scheduleType: habit.scheduleType,
+      context: input.context,
+      streak: String(currentStreak),
+      loggedToday: loggedToday ? 'yes' : 'no',
+    },
+    'Return JSON only: { "message": "your message here" }',
+  );
 
   const gemini = await generateGeminiJson(prompt, geminiHabitMessageJsonSchema);
   if (gemini) {
@@ -326,6 +379,7 @@ Return JSON only: { "message": "your message here" }`;
       message: gemini.message.slice(0, 280),
       planSlug: entitlements.planSlug,
       source: 'gemini',
+      promptSlug,
     };
   }
 
@@ -335,6 +389,7 @@ Return JSON only: { "message": "your message here" }`;
     message: fallbackHabitMessage(habit.title, input.context, currentStreak, loggedToday),
     planSlug: entitlements.planSlug,
     source: 'fallback',
+    promptSlug,
   };
 }
 
@@ -354,4 +409,175 @@ function fallbackHabitMessage(
     return `Your ${streak}-day streak on "${title}" is worth protecting. Log it while it's fresh.`;
   }
   return `"${title}" fits who you're becoming. Show up once today — that's the whole game.`;
+}
+
+export async function chat(userId: string, input: AiChatInput): Promise<AiChatResponse> {
+  const entitlements = await assertHasAi(userId);
+  const prefs = await getUserPrefs(userId);
+  const today = todayIn(prefs.timezone);
+  const user = await prisma.user.findFirst({
+    where: { id: userId, deletedAt: null },
+    select: { name: true },
+  });
+
+  let focusedHabit = 'none';
+  if (input.habitId) {
+    const habit = await prisma.habit.findFirst({
+      where: { id: input.habitId, userId, archivedAt: null },
+      select: { title: true, type: true, scheduleType: true },
+    });
+    if (!habit) throw AppError.notFound('Habit not found');
+    focusedHabit = `${habit.title} (${habit.type}, ${habit.scheduleType})`;
+  }
+
+  const history =
+    input.history && input.history.length > 0
+      ? input.history.map((turn) => `${turn.role}: ${turn.content}`).join('\n')
+      : 'none';
+
+  const { prompt, promptSlug } = await composePrompt(
+    'chat',
+    {
+      userName: user?.name ?? 'there',
+      today,
+      habits: await loadHabitList(userId),
+      habitTitle: focusedHabit,
+      history,
+      message: input.message.trim(),
+    },
+    'Return JSON only: { "reply": "your answer here" }',
+  );
+
+  const gemini = await generateGeminiJson(prompt, geminiChatJsonSchema);
+  if (gemini) {
+    return {
+      reply: gemini.reply.trim(),
+      planSlug: entitlements.planSlug,
+      source: 'gemini',
+      promptSlug,
+    };
+  }
+
+  return {
+    reply: fallbackChatReply(input.message),
+    planSlug: entitlements.planSlug,
+    source: 'fallback',
+    promptSlug,
+  };
+}
+
+function fallbackChatReply(message: string): string {
+  const text = message.toLowerCase();
+  if (text.includes('create') || text.includes('new habit')) {
+    return 'Tell me the habit you want to start and how often. I can turn that into a ready-to-save habit with Create habit.';
+  }
+  if (text.includes('idea') || text.includes('suggest') || text.includes('generate')) {
+    return 'Share a goal — sleep, focus, fitness, reading — and I can generate a few small habit ideas you can try this week.';
+  }
+  return 'I can help with streaks, schedules, missed days, and new habits. What do you want to improve first?';
+}
+
+export async function createHabitDraft(
+  userId: string,
+  input: AiCreateHabitInput,
+): Promise<AiCreateHabitResponse> {
+  const entitlements = await assertHasAi(userId);
+  const prefs = await getUserPrefs(userId);
+  const today = todayIn(prefs.timezone);
+  const user = await prisma.user.findFirst({
+    where: { id: userId, deletedAt: null },
+    select: { name: true },
+  });
+
+  const message = input.message?.trim() || input.goal?.trim() || 'a simple daily habit';
+  const goal = input.goal?.trim() || message;
+
+  const { prompt, promptSlug } = await composePrompt(
+    'create_habit',
+    {
+      userName: user?.name ?? 'there',
+      today,
+      message,
+      goal,
+      habits: await loadHabitList(userId),
+    },
+    `Return JSON only:
+{
+  "title": "short habit name",
+  "description": "one sentence what to do",
+  "type": "BUILD or BREAK",
+  "scheduleType": "DAILY|SPECIFIC_DAYS|TIMES_PER_WEEK|INTERVAL",
+  "scheduleDays": [0-6] ,
+  "targetPerWeek": number or null,
+  "intervalDays": number or null,
+  "icon": "emoji or short icon name",
+  "color": "#RRGGBB",
+  "reason": "why this fits"
+}`,
+  );
+
+  const gemini = await generateGeminiJson(prompt, geminiCreateHabitJsonSchema);
+  if (gemini) {
+    return {
+      habit: toHabitDraft(gemini, today),
+      reason: gemini.reason,
+      planSlug: entitlements.planSlug,
+      source: 'gemini',
+      promptSlug,
+    };
+  }
+
+  return {
+    habit: fallbackCreateHabit(goal, today),
+    reason: `A small daily habit that supports "${goal}".`,
+    planSlug: entitlements.planSlug,
+    source: 'fallback',
+    promptSlug,
+  };
+}
+
+function toHabitDraft(
+  input: {
+    title: string;
+    description: string;
+    type: AiCreatedHabitDraft['type'];
+    scheduleType: AiCreatedHabitDraft['scheduleType'];
+    scheduleDays?: number[] | undefined;
+    targetPerWeek?: number | null | undefined;
+    intervalDays?: number | null | undefined;
+    icon: string;
+    color?: string | undefined;
+  },
+  startDate: string,
+): AiCreatedHabitDraft {
+  const scheduleType = input.scheduleType;
+  const days = input.scheduleDays ?? [];
+
+  return {
+    title: input.title,
+    description: input.description,
+    type: input.type,
+    scheduleType,
+    scheduleDays: scheduleType === 'SPECIFIC_DAYS' ? days : [],
+    targetPerWeek: scheduleType === 'TIMES_PER_WEEK' ? (input.targetPerWeek ?? 3) : null,
+    intervalDays: scheduleType === 'INTERVAL' ? (input.intervalDays ?? 2) : null,
+    icon: input.icon,
+    color: input.color ?? '#2B4CE0',
+    startDate,
+  };
+}
+
+function fallbackCreateHabit(goal: string, startDate: string): AiCreatedHabitDraft {
+  return {
+    title: 'Two-minute start',
+    description: `Spend two minutes on ${goal} at a time you already have a routine.`,
+    type: 'BUILD',
+    scheduleType: 'DAILY',
+    scheduleDays: [],
+    targetPerWeek: null,
+    intervalDays: null,
+    icon: 'check',
+    color: '#2B4CE0',
+    startDate,
+  };
 }

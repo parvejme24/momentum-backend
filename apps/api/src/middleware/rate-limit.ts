@@ -26,3 +26,5 @@ export const authRateLimit: RequestHandler = limit(60_000, 5);
 export const adminWriteRateLimit: RequestHandler = limit(60_000, 30);
 
 export const billingWriteRateLimit: RequestHandler = limit(60_000, 20);
+
+export const aiWriteRateLimit: RequestHandler = limit(60_000, 20);

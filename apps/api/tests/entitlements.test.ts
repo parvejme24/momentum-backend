@@ -234,6 +234,20 @@ describe('entitlements', () => {
     expect(ideas.status).toBe(200);
     expect(ideas.body.ideas.length).toBe(2);
 
+    const chat = await request(app)
+      .post('/v1/ai/chat')
+      .set(proAuth)
+      .send({ message: 'How do I rebuild a streak after missing two days?' });
+    expect(chat.status).toBe(200);
+    expect(chat.body.reply.length).toBeGreaterThan(0);
+
+    const created = await request(app)
+      .post('/v1/ai/create-habit')
+      .set(proAuth)
+      .send({ message: 'I want to drink more water' });
+    expect(created.status).toBe(200);
+    expect(created.body.habit.title.length).toBeGreaterThan(0);
+
     const habit = await request(app)
       .post('/v1/habits')
       .set(proAuth)

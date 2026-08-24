@@ -66,11 +66,15 @@ export async function cancel(req: Request, res: Response): Promise<void> {
 
 export async function sslCommerzIpn(req: Request, res: Response): Promise<void> {
   const payload = req.body as Record<string, unknown>;
+  const tranId = stringField(payload.tran_id);
+  const valId = stringField(payload.val_id);
+  const status = stringField(payload.status);
+  const amount = stringField(payload.amount);
   await handleSslCommerzIpn({
-    tran_id: stringField(payload.tran_id),
-    val_id: stringField(payload.val_id),
-    status: stringField(payload.status),
-    amount: stringField(payload.amount),
+    ...(tranId ? { tran_id: tranId } : {}),
+    ...(valId ? { val_id: valId } : {}),
+    ...(status ? { status } : {}),
+    ...(amount ? { amount } : {}),
   });
   res.status(200).json({ received: true });
 }
