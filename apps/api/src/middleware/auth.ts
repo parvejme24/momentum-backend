@@ -32,6 +32,8 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     }
 
     req.userId = payload.sub;
+    req.userRole = user.role;
+    req.authStatus = user;
     next();
   } catch (err) {
     next(err);
