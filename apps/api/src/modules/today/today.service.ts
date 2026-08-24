@@ -4,6 +4,7 @@ import {
   isDue,
   isStreakAtRisk,
   localDate,
+  longestStreak,
   nextDueDate,
   streakFor,
   type HabitSchedule,
@@ -42,24 +43,13 @@ function groupLogs(logs: HabitLog[]): Map<string, Map<LocalDate, LogStatus>> {
   return grouped;
 }
 
-function longestStreak(
-  schedule: HabitSchedule,
-  logs: Map<LocalDate, LogStatus>,
-  today: LocalDate,
-  weekStartsOn: number,
-): number {
-  let longest = streakFor(schedule, logs, today, weekStartsOn);
-  for (const date of logs.keys()) {
-    longest = Math.max(longest, streakFor(schedule, logs, date, weekStartsOn));
-  }
-  return longest;
-}
-
 export async function getToday(userId: string, query: TodayQuery): Promise<TodayResponse> {
   // Query 1: user + active habits
   const user = await prisma.user.findFirst({
     where: { id: userId, deletedAt: null },
-    include: {
+    select: {
+      timezone: true,
+      weekStartsOn: true,
       habits: {
         where: { archivedAt: null },
         orderBy: { sortOrder: 'asc' },

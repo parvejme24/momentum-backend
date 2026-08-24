@@ -1,6 +1,7 @@
 import {
   addDays,
   localDate,
+  longestStreak,
   streakFor,
   todayIn,
   type HabitSchedule,
@@ -131,12 +132,7 @@ async function computeStreakSnapshot(
   const map = logsToMap(logs);
   const schedule = toSchedule(habit);
   const current = streakFor(schedule, map, today, prefs.weekStartsOn);
-
-  let longest = current;
-  const dates = [...map.keys()].sort();
-  for (const date of dates) {
-    longest = Math.max(longest, streakFor(schedule, map, date, prefs.weekStartsOn));
-  }
+  const longest = longestStreak(schedule, map, today, prefs.weekStartsOn);
 
   return { current, longest };
 }
@@ -176,8 +172,10 @@ export async function upsertLog(
   rawLocalDate: string,
   input: UpsertLogInput,
 ): Promise<UpsertLogResponse> {
-  const prefs = await getUserPrefs(userId);
-  const habit = await requireOwnedHabit(userId, habitId);
+  const [prefs, habit] = await Promise.all([
+    getUserPrefs(userId),
+    requireOwnedHabit(userId, habitId),
+  ]);
   const date = assertLoggableLocalDate(rawLocalDate, prefs.timezone, habit.startDate);
   const { status, value } = resolveStatusAndValue(habit, input);
 
@@ -235,8 +233,10 @@ export async function deleteLog(
   habitId: string,
   rawLocalDate: string,
 ): Promise<DeleteLogResponse> {
-  const prefs = await getUserPrefs(userId);
-  const habit = await requireOwnedHabit(userId, habitId);
+  const [prefs, habit] = await Promise.all([
+    getUserPrefs(userId),
+    requireOwnedHabit(userId, habitId),
+  ]);
   const date = assertLoggableLocalDate(rawLocalDate, prefs.timezone, habit.startDate);
 
   await prisma.habitLog.deleteMany({

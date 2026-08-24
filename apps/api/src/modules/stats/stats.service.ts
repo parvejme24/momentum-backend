@@ -7,6 +7,7 @@ import {
   isDue,
   localDate,
   startOfWeek,
+  longestStreak,
   streakFor,
   type HabitSchedule,
   type LocalDate,
@@ -57,19 +58,6 @@ function groupLogs(logs: HabitLog[]): Map<string, HabitLog[]> {
 
 function isCompleted(status: LogStatus | undefined): boolean {
   return status === 'DONE' || status === 'PARTIAL';
-}
-
-function longestStreak(
-  schedule: HabitSchedule,
-  map: Map<LocalDate, LogStatus>,
-  today: LocalDate,
-  weekStartsOn: number,
-): number {
-  let longest = streakFor(schedule, map, today, weekStartsOn);
-  for (const date of map.keys()) {
-    longest = Math.max(longest, streakFor(schedule, map, date, weekStartsOn));
-  }
-  return longest;
 }
 
 function classifyDueDays(
@@ -123,14 +111,15 @@ export async function getHabitStats(
   habitId: string,
   query: HabitStatsQuery,
 ): Promise<HabitStatsResponse> {
-  await assertHasStats(userId);
-  // Query 1: habit + owner prefs
-  const habit = await prisma.habit.findFirst({
-    where: { id: habitId, userId },
-    include: {
-      user: { select: { timezone: true, weekStartsOn: true, deletedAt: true } },
-    },
-  });
+  const [, habit] = await Promise.all([
+    assertHasStats(userId),
+    prisma.habit.findFirst({
+      where: { id: habitId, userId },
+      include: {
+        user: { select: { timezone: true, weekStartsOn: true, deletedAt: true } },
+      },
+    }),
+  ]);
   if (!habit || habit.user.deletedAt) throw AppError.notFound('Habit not found');
 
   const prefs = habit.user;
@@ -238,17 +227,20 @@ export async function getOverviewStats(
   userId: string,
   query: OverviewStatsQuery,
 ): Promise<OverviewStatsResponse> {
-  await assertHasStats(userId);
-  // Query 1: user + active habits
-  const user = await prisma.user.findFirst({
-    where: { id: userId, deletedAt: null },
-    include: {
-      habits: {
-        where: { archivedAt: null },
-        orderBy: { sortOrder: 'asc' },
+  const [, user] = await Promise.all([
+    assertHasStats(userId),
+    prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: {
+        timezone: true,
+        weekStartsOn: true,
+        habits: {
+          where: { archivedAt: null },
+          orderBy: { sortOrder: 'asc' },
+        },
       },
-    },
-  });
+    }),
+  ]);
   if (!user) throw AppError.unauthorized('User not found');
 
   const prefs = { timezone: user.timezone, weekStartsOn: user.weekStartsOn };

@@ -146,17 +146,18 @@ function normalizeScheduleForWrite(input: {
 }
 
 export async function listHabits(userId: string, archived = false): Promise<HabitResponse[]> {
-  const prefs = await getUserPrefs(userId);
+  const [prefs, habits] = await Promise.all([
+    getUserPrefs(userId),
+    prisma.habit.findMany({
+      where: {
+        userId,
+        archivedAt: archived ? { not: null } : null,
+      },
+      orderBy: { sortOrder: 'asc' },
+    }),
+  ]);
   const today = todayIn(prefs.timezone);
   const windowStart = addDays(today, -STREAK_LOOKBACK_DAYS);
-
-  const habits = await prisma.habit.findMany({
-    where: {
-      userId,
-      archivedAt: archived ? { not: null } : null,
-    },
-    orderBy: { sortOrder: 'asc' },
-  });
 
   if (habits.length === 0) return [];
 
@@ -213,14 +214,15 @@ export async function createHabit(userId: string, input: CreateHabitInput): Prom
 }
 
 export async function getHabit(userId: string, habitId: string): Promise<HabitDetailResponse> {
-  const prefs = await getUserPrefs(userId);
+  const [prefs, habit] = await Promise.all([
+    getUserPrefs(userId),
+    prisma.habit.findFirst({
+      where: { id: habitId, userId },
+    }),
+  ]);
   const today = todayIn(prefs.timezone);
   const historyStart = addDays(today, -(HISTORY_DAYS - 1));
   const streakStart = addDays(today, -STREAK_LOOKBACK_DAYS);
-
-  const habit = await prisma.habit.findFirst({
-    where: { id: habitId, userId },
-  });
 
   if (!habit) {
     throw AppError.notFound('Habit not found');
@@ -260,11 +262,12 @@ export async function updateHabit(
   habitId: string,
   input: UpdateHabitInput,
 ): Promise<HabitResponse> {
-  const prefs = await getUserPrefs(userId);
-
-  const existing = await prisma.habit.findFirst({
-    where: { id: habitId, userId },
-  });
+  const [prefs, existing] = await Promise.all([
+    getUserPrefs(userId),
+    prisma.habit.findFirst({
+      where: { id: habitId, userId },
+    }),
+  ]);
 
   if (!existing) {
     throw AppError.notFound('Habit not found');
