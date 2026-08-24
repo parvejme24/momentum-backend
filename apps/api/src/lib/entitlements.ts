@@ -1,6 +1,7 @@
 import type { PlanLimits, UserEntitlements } from '@momentum/types';
 import { planLimitsSchema } from '@momentum/types';
 import type { Plan, PlanSubscription, Prisma } from '../generated/prisma/client.js';
+import { getAuthStatus } from './auth-cache.js';
 import { AppError } from './errors.js';
 import { prisma } from './prisma.js';
 import { FREE_PLAN_SLUG, isProPlanSlug } from './plan-catalog.js';
@@ -63,11 +64,20 @@ async function expireStaleSubscription(sub: PlanSubscription): Promise<void> {
   }
 }
 
+const PLAN_CACHE_TTL_MS = 30_000;
+const planCache = new Map<string, { expiresAt: number; plan: PlanWithFeatures | null }>();
+
 async function getPublishedPlan(slug: string): Promise<PlanWithFeatures | null> {
-  return prisma.plan.findFirst({
+  const hit = planCache.get(slug);
+  if (hit && hit.expiresAt > Date.now()) return hit.plan;
+
+  const plan = await prisma.plan.findFirst({
     where: { slug, status: 'PUBLISHED' },
     include: { features: { orderBy: { sortOrder: 'asc' } } },
   });
+
+  planCache.set(slug, { expiresAt: Date.now() + PLAN_CACHE_TTL_MS, plan });
+  return plan;
 }
 
 async function getFreePlan(): Promise<PlanWithFeatures> {
@@ -133,13 +143,14 @@ function buildEntitlements(input: {
 }
 
 export async function resolveUserEntitlements(userId: string): Promise<UserEntitlements> {
-  const activeHabits = await countActiveHabits(userId);
-
-  const live = await prisma.planSubscription.findFirst({
-    where: { userId, status: { in: LIVE_SUB_STATUSES } },
-    include: { plan: { include: { features: { orderBy: { sortOrder: 'asc' } } } } },
-    orderBy: { createdAt: 'desc' },
-  });
+  const [activeHabits, live] = await Promise.all([
+    countActiveHabits(userId),
+    prisma.planSubscription.findFirst({
+      where: { userId, status: { in: LIVE_SUB_STATUSES } },
+      include: { plan: { include: { features: { orderBy: { sortOrder: 'asc' } } } } },
+      orderBy: { createdAt: 'desc' },
+    }),
+  ]);
 
   if (live) {
     if (!subscriptionIsActive(live)) {
@@ -155,11 +166,8 @@ export async function resolveUserEntitlements(userId: string): Promise<UserEntit
     }
   }
 
-  const adminUser = await prisma.user.findFirst({
-    where: { id: userId, role: 'ADMIN', deletedAt: null, bannedAt: null },
-    select: { id: true },
-  });
-  if (adminUser) {
+  const auth = await getAuthStatus(userId);
+  if (auth?.role === 'ADMIN' && !auth.deletedAt && !auth.bannedAt) {
     const proPlan = await getPublishedPlan('pro-lifetime');
     if (proPlan) {
       return buildEntitlements({
