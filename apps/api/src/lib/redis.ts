@@ -14,12 +14,19 @@ function shouldUseTls(redisUrl: string, redisTlsFlag: boolean): boolean {
   return false;
 }
 
-export function createRedisClient(): Redis {
+export function createRedisClient(options?: { enableOfflineQueue?: boolean }): Redis {
   const useTls = shouldUseTls(env.REDIS_URL, env.REDIS_TLS);
+  const enableOfflineQueue = options?.enableOfflineQueue ?? false;
 
   const client = new Redis(env.REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: true,
+    enableOfflineQueue,
+    connectTimeout: 4000,
+    ...(enableOfflineQueue ? {} : { commandTimeout: 1500 }),
+    retryStrategy(times) {
+      return Math.min(times * 200, 2000);
+    },
     ...(useTls ? { tls: {} } : {}),
   });
 
