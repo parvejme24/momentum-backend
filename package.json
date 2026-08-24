@@ -11,7 +11,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build -w @momentum/core && npm run build -w @momentum/types && npm run db:generate && npm run build -w @momentum/api && npm run build -w @momentum/worker",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -27,7 +27,7 @@
     "db:seed": "npm run seed -w @momentum/api",
     "check:db": "node --env-file=.env --import tsx apps/api/scripts/check-db.ts",
     "check:redis": "node --env-file=.env --import tsx apps/api/scripts/check-redis.ts",
-    "prepare": "husky"
+    "prepare": "node -e \"if (process.env.CI || process.env.VERCEL || process.env.RENDER) process.exit(0)\" && husky"
   },
   "lint-staged": {
     "*.ts": [

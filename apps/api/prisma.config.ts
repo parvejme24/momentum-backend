@@ -1,10 +1,10 @@
-import { config as loadEnv } from 'dotenv';
+import { config as loadDotenv } from 'dotenv';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defineConfig, env } from 'prisma/config';
+import { defineConfig } from 'prisma/config';
 
-const here = dirname(fileURLToPath(import.meta.url));
-loadEnv({ path: join(here, '../../.env') });
+const root = dirname(fileURLToPath(import.meta.url));
+loadDotenv({ path: join(root, '../../.env') });
 
 export default defineConfig({
   schema: 'prisma/schema.prisma',
@@ -13,7 +13,10 @@ export default defineConfig({
     seed: 'tsx --env-file=../../.env prisma/seed.ts',
   },
   datasource: {
-    // Neon: direct (non-pooler) URL for Migrate / Studio
-    url: env('DIRECT_URL'),
+    // Generate can run without a live DB. Migrate/Studio still use DIRECT_URL when set.
+    url:
+      process.env.DIRECT_URL ||
+      process.env.DATABASE_URL ||
+      'postgresql://postgres:postgres@127.0.0.1:5432/postgres',
   },
 });
