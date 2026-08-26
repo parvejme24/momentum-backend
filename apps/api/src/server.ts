@@ -10,7 +10,7 @@ async function main() {
   const app = createApp();
   const httpServer = createServer(app);
 
-  httpServer.listen(env.PORT, () => {
+  httpServer.listen(env.PORT, '0.0.0.0', () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Momentum API listening');
   });
 

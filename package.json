@@ -12,6 +12,9 @@
   ],
   "scripts": {
     "build": "npm run build -w @momentum/core && npm run build -w @momentum/types && npm run db:generate && npm run build -w @momentum/api && npm run build -w @momentum/worker",
+    "start": "npm run start -w @momentum/api",
+    "start:worker": "npm run start -w @momentum/worker",
+    "release": "npm exec -w @momentum/api -- prisma migrate deploy",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
