@@ -1,4 +1,42 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+
+/** Local `npm start` does not load `.env`; Render injects vars so this is a no-op there. */
+function findLocalEnvFile(startDir: string): string | undefined {
+  let dir = startDir;
+  for (let i = 0; i < 6; i += 1) {
+    const candidate = join(dir, '.env');
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+function loadLocalEnvFile() {
+  const file = findLocalEnvFile(dirname(fileURLToPath(import.meta.url)));
+  if (!file) return;
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+loadLocalEnvFile();
 
 function readEnv(key: string): string | undefined {
   const value = process.env[key];
