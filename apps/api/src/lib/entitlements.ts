@@ -7,7 +7,7 @@ import { prisma } from './prisma.js';
 import { FREE_PLAN_SLUG, isProPlanSlug } from './plan-catalog.js';
 import { LIVE_SUB_STATUSES } from '../modules/admin/mappers.js';
 
-type PlanWithFeatures = Plan & { features: { label: string; sortOrder: number }[] };
+type PlanLimitsSource = Pick<Plan, 'slug' | 'name' | 'limits' | 'interval'>;
 
 const DEFAULT_FREE_LIMITS: PlanLimits = {
   maxHabits: 20,
@@ -51,7 +51,9 @@ function subscriptionIsActive(sub: Pick<PlanSubscription, 'status' | 'currentPer
   return true;
 }
 
-async function expireStaleSubscription(sub: PlanSubscription): Promise<void> {
+async function expireStaleSubscription(
+  sub: Pick<PlanSubscription, 'id' | 'status' | 'currentPeriodEnd'>,
+): Promise<void> {
   if (
     sub.currentPeriodEnd &&
     sub.currentPeriodEnd.getTime() <= Date.now() &&
@@ -65,48 +67,34 @@ async function expireStaleSubscription(sub: PlanSubscription): Promise<void> {
 }
 
 const PLAN_CACHE_TTL_MS = 30_000;
-const planCache = new Map<string, { expiresAt: number; plan: PlanWithFeatures | null }>();
+const planCache = new Map<string, { expiresAt: number; plan: PlanLimitsSource | null }>();
 
-async function getPublishedPlan(slug: string): Promise<PlanWithFeatures | null> {
+export function invalidatePublishedPlanCache(): void {
+  planCache.clear();
+}
+
+async function getPublishedPlan(slug: string): Promise<PlanLimitsSource | null> {
   const hit = planCache.get(slug);
   if (hit && hit.expiresAt > Date.now()) return hit.plan;
 
   const plan = await prisma.plan.findFirst({
     where: { slug, status: 'PUBLISHED' },
-    include: { features: { orderBy: { sortOrder: 'asc' } } },
+    select: { slug: true, name: true, limits: true, interval: true },
   });
 
   planCache.set(slug, { expiresAt: Date.now() + PLAN_CACHE_TTL_MS, plan });
   return plan;
 }
 
-async function getFreePlan(): Promise<PlanWithFeatures> {
+async function getFreePlan(): Promise<PlanLimitsSource> {
   const plan = await getPublishedPlan(FREE_PLAN_SLUG);
   if (plan) return plan;
 
   return {
-    id: '00000000-0000-0000-0000-000000000000',
     slug: FREE_PLAN_SLUG,
     name: 'Free',
-    blurb: 'Limited habits and features.',
-    priceCents: 0,
-    currency: 'USD',
-    interval: 'FOREVER',
-    intervalCount: 1,
-    seatBased: false,
-    highlighted: false,
-    sortOrder: 0,
-    status: 'PUBLISHED',
-    ctaLabel: 'Start free',
-    ctaHref: '/register',
     limits: DEFAULT_FREE_LIMITS as Prisma.JsonValue,
-    publishedAt: new Date(),
-    currentVersion: 1,
-    createdById: null,
-    updatedById: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    features: [{ label: '20 habits', sortOrder: 0 }],
+    interval: 'FOREVER',
   };
 }
 
@@ -147,7 +135,12 @@ export async function resolveUserEntitlements(userId: string): Promise<UserEntit
     countActiveHabits(userId),
     prisma.planSubscription.findFirst({
       where: { userId, status: { in: LIVE_SUB_STATUSES } },
-      include: { plan: { include: { features: { orderBy: { sortOrder: 'asc' } } } } },
+      select: {
+        id: true,
+        status: true,
+        currentPeriodEnd: true,
+        plan: { select: { slug: true, name: true, limits: true, interval: true } },
+      },
       orderBy: { createdAt: 'desc' },
     }),
   ]);

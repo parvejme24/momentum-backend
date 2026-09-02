@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { Server, type Socket } from 'socket.io';
-import { corsOrigins } from './lib/cors-origins.js';
+import { isAllowedOrigin } from './lib/cors-origins.js';
 import { logger } from './lib/logger.js';
 import { prisma } from './lib/prisma.js';
 import { createRedisClient } from './lib/redis.js';
@@ -25,7 +25,9 @@ function socketAuth(socket: Socket): SocketAuth {
 export async function setupSocket(httpServer: HttpServer): Promise<Server> {
   const io = new Server(httpServer, {
     cors: {
-      origin: corsOrigins(),
+      origin: (origin, callback) => {
+        callback(null, isAllowedOrigin(origin));
+      },
       credentials: true,
     },
   });

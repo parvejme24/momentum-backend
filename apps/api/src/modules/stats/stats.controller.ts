@@ -21,7 +21,12 @@ function requireHabitId(req: Request): string {
 
 export async function getHabitStats(req: Request, res: Response): Promise<void> {
   const query = req.query as unknown as HabitStatsQuery;
-  const result = await statsService.getHabitStats(requireUserId(req), requireHabitId(req), query);
+  const result = await statsService.getHabitStats(
+    requireUserId(req),
+    requireHabitId(req),
+    query,
+    req.habit ?? null,
+  );
   res.status(200).json(result);
 }
 

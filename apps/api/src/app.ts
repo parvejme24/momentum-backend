@@ -1,9 +1,10 @@
 import cors from 'cors';
+import compression from 'compression';
 import express from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { env } from './lib/env.js';
-import { corsOrigins } from './lib/cors-origins.js';
+import { isAllowedOrigin } from './lib/cors-origins.js';
 import { logger } from './lib/logger.js';
 import { errorHandler } from './middleware/error.js';
 import { authRouter } from './modules/auth/auth.route.js';
@@ -41,9 +42,14 @@ export function createApp() {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(helmet());
+  if (env.NODE_ENV !== 'test') {
+    app.use(compression());
+  }
   app.use(
     cors({
-      origin: corsOrigins(),
+      origin: (origin, callback) => {
+        callback(null, isAllowedOrigin(origin));
+      },
       credentials: true,
     }),
   );

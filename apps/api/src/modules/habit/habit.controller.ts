@@ -38,13 +38,22 @@ export async function create(req: Request, res: Response): Promise<void> {
 }
 
 export async function getById(req: Request, res: Response): Promise<void> {
-  const habit = await habitService.getHabit(requireUserId(req), requireHabitId(req));
+  const habit = await habitService.getHabit(
+    requireUserId(req),
+    requireHabitId(req),
+    req.habit ?? null,
+  );
   res.status(200).json({ habit });
 }
 
 export async function update(req: Request, res: Response): Promise<void> {
   const body = req.body as UpdateHabitInput;
-  const habit = await habitService.updateHabit(requireUserId(req), requireHabitId(req), body);
+  const habit = await habitService.updateHabit(
+    requireUserId(req),
+    requireHabitId(req),
+    body,
+    req.habit ?? null,
+  );
   res.status(200).json({ habit });
 }
 
@@ -55,18 +64,31 @@ export async function reorder(req: Request, res: Response): Promise<void> {
 }
 
 export async function archive(req: Request, res: Response): Promise<void> {
-  const habit = await habitService.archiveHabit(requireUserId(req), requireHabitId(req));
+  const habit = await habitService.archiveHabit(
+    requireUserId(req),
+    requireHabitId(req),
+    req.habit ?? null,
+  );
   res.status(200).json({ habit });
 }
 
 export async function restore(req: Request, res: Response): Promise<void> {
-  const habit = await habitService.restoreHabit(requireUserId(req), requireHabitId(req));
+  const habit = await habitService.restoreHabit(
+    requireUserId(req),
+    requireHabitId(req),
+    req.habit ?? null,
+  );
   res.status(200).json({ habit });
 }
 
 export async function remove(req: Request, res: Response): Promise<void> {
   const query = req.query as unknown as DeleteHabitQuery;
-  await habitService.deleteHabit(requireUserId(req), requireHabitId(req), query.confirm === 'true');
+  await habitService.deleteHabit(
+    requireUserId(req),
+    requireHabitId(req),
+    query.confirm === 'true',
+    req.habit ?? null,
+  );
   res.status(200).json({
     success: true,
     message: 'Habit permanently deleted',

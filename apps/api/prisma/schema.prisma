@@ -161,6 +161,8 @@ model User {
   @@index([deletedAt])
   @@index([bannedAt])
   @@index([role, deletedAt])
+  @@index([lastActiveAt])
+  @@index([createdAt])
   @@map("users")
 }
 
@@ -277,6 +279,7 @@ model HabitLog {
   @@unique([habitId, localDate])
   @@index([userId, localDate])
   @@index([habitId, localDate(sort: Desc)])
+  @@index([userId, habitId, localDate])
   @@map("habit_logs")
 }
 
@@ -420,7 +423,7 @@ model PlanSubscription {
   payments Payment[]
 
   @@index([planId, status])
-  @@index([userId, status])
+  @@index([userId, status, createdAt])
   @@index([status, currentPeriodEnd])
   @@map("plan_subscriptions")
 }

@@ -27,6 +27,7 @@ export async function upsert(req: Request, res: Response): Promise<void> {
     requireParam(req, 'id'),
     requireParam(req, 'localDate'),
     req.body as UpsertLogInput,
+    req.habit ?? null,
   );
   res.status(200).json(result);
 }
@@ -36,6 +37,7 @@ export async function remove(req: Request, res: Response): Promise<void> {
     requireUserId(req),
     requireParam(req, 'id'),
     requireParam(req, 'localDate'),
+    req.habit ?? null,
   );
   res.status(200).json(result);
 }
@@ -45,6 +47,7 @@ export async function listForHabit(req: Request, res: Response): Promise<void> {
     requireUserId(req),
     requireParam(req, 'id'),
     req.query as unknown as LogRangeQuery,
+    req.habit ?? null,
   );
   res.status(200).json({ logs });
 }

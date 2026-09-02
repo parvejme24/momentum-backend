@@ -21,6 +21,8 @@ import type {
   Prisma,
 } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
+import { env } from '../../lib/env.js';
+import { invalidatePublishedPlanCache } from '../../lib/entitlements.js';
 import { buildCompareFeatureRows, buildPackageFeatures } from '../../lib/plan-feature-catalog.js';
 import { CATALOG_PLAN_SLUGS, isCatalogPlanSlug } from '../../lib/plan-catalog.js';
 import type { CatalogPlanSlug } from '../../lib/plan-catalog.js';
@@ -54,6 +56,14 @@ const STATUS_FROM_DB: Record<DbStatus, PlanStatus> = {
 };
 
 type PlanWithFeatures = Plan & { features: PlanFeature[] };
+
+const PUBLIC_PLANS_TTL_MS = 30_000;
+let publicPlansCache: { expiresAt: number; plans: PublicPlan[] } | null = null;
+
+function invalidatePublicPricingCache(): void {
+  publicPlansCache = null;
+  invalidatePublishedPlanCache();
+}
 
 function parseLimits(value: Prisma.JsonValue): PlanLimits {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -157,23 +167,27 @@ function replaceFeatures(planId: string, labels: string[]): Prisma.PlanFeatureCr
 }
 
 export async function listPublishedPlans(): Promise<PublicPlan[]> {
+  if (env.NODE_ENV !== 'test' && publicPlansCache && publicPlansCache.expiresAt > Date.now()) {
+    return publicPlansCache.plans;
+  }
+
   const plans = await prisma.plan.findMany({
     where: { status: 'PUBLISHED', slug: { in: [...CATALOG_PLAN_SLUGS] } },
     include: { features: { orderBy: { sortOrder: 'asc' } } },
     orderBy: { sortOrder: 'asc' },
   });
-  return plans.map(toPublicPlan);
+  const mapped = plans.map(toPublicPlan);
+  publicPlansCache = { expiresAt: Date.now() + PUBLIC_PLANS_TTL_MS, plans: mapped };
+  return mapped;
 }
 
 export async function getPublishedPlanBySlug(slug: string): Promise<PublicPlan> {
   if (!isCatalogPlanSlug(slug)) throw AppError.notFound('Plan not found');
 
-  const plan = await prisma.plan.findFirst({
-    where: { slug, status: 'PUBLISHED' },
-    include: { features: { orderBy: { sortOrder: 'asc' } } },
-  });
+  const plans = await listPublishedPlans();
+  const plan = plans.find((row) => row.slug === slug);
   if (!plan) throw AppError.notFound('Plan not found');
-  return toPublicPlan(plan);
+  return plan;
 }
 
 export async function listPricingPackages(): Promise<PricingPackage[]> {
@@ -194,15 +208,10 @@ export async function listPricingPackages(): Promise<PricingPackage[]> {
 }
 
 export async function getCompareTable(): Promise<CompareResponse> {
-  const plans = await prisma.plan.findMany({
-    where: { status: 'PUBLISHED', slug: { in: [...CATALOG_PLAN_SLUGS] } },
-    orderBy: { sortOrder: 'asc' },
-  });
+  const plans = await listPublishedPlans();
 
   const slugs = plans.map((plan) => plan.slug as CatalogPlanSlug);
-  const limitsBySlug = Object.fromEntries(
-    plans.map((plan) => [plan.slug, parseLimits(plan.limits)]),
-  );
+  const limitsBySlug = Object.fromEntries(plans.map((plan) => [plan.slug, plan.limits]));
 
   return {
     plans: plans.map((plan) => ({
@@ -210,9 +219,9 @@ export async function getCompareTable(): Promise<CompareResponse> {
       name: plan.name,
       highlighted: plan.highlighted,
       priceCents: plan.priceCents,
-      price: plan.priceCents / 100,
+      price: plan.price,
       currency: plan.currency,
-      interval: INTERVAL_FROM_DB[plan.interval],
+      interval: plan.interval,
       ctaLabel: plan.ctaLabel,
     })),
     features: buildCompareFeatureRows(slugs, limitsBySlug),
@@ -262,6 +271,7 @@ export async function createPlan(userId: string, input: CreatePlanInput): Promis
     include: { features: { orderBy: { sortOrder: 'asc' } } },
   });
 
+  invalidatePublicPricingCache();
   return toAdminPlan(plan);
 }
 
@@ -338,6 +348,7 @@ export async function updatePlan(
     return plan;
   });
 
+  invalidatePublicPricingCache();
   return {
     plan: toAdminPlan(updated),
     versionCreated: shouldVersion,
@@ -373,6 +384,7 @@ export async function publishPlan(userId: string, id: string): Promise<AdminPlan
   });
 
   const published = toAdminPlan(plan);
+  invalidatePublicPricingCache();
   notifyAdminsPlanPublished(published.name, published.id);
   return published;
 }
@@ -396,6 +408,7 @@ export async function archivePlan(userId: string, id: string): Promise<AdminPlan
     include: { features: { orderBy: { sortOrder: 'asc' } } },
   });
 
+  invalidatePublicPricingCache();
   return toAdminPlan(plan);
 }
 
@@ -417,6 +430,7 @@ export async function reorderPlans(userId: string, input: ReorderPlansInput): Pr
     ),
   );
 
+  invalidatePublicPricingCache();
   return listAdminPlans({ status: 'all' });
 }
 
@@ -435,4 +449,5 @@ export async function deletePlan(id: string): Promise<void> {
   }
 
   await prisma.plan.delete({ where: { id: existing.id } });
+  invalidatePublicPricingCache();
 }

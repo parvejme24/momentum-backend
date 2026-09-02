@@ -96,6 +96,22 @@ describe('AI chat and prompts', () => {
     expect(chat.body.reply.length).toBeGreaterThan(0);
     expect(['gemini', 'fallback']).toContain(chat.body.source);
 
+    const bangla = await request(app)
+      .post('/v1/ai/chat')
+      .set(customer.auth)
+      .send({ message: 'আজকে আমার অভ্যাস কেমন চলছে?' });
+    expect(bangla.status).toBe(200);
+    expect(typeof bangla.body.reply).toBe('string');
+    expect(bangla.body.reply.length).toBeGreaterThan(0);
+
+    const banglish = await request(app)
+      .post('/v1/ai/chat')
+      .set(customer.auth)
+      .send({ message: 'Ami ajke gym miss korchi, ki korbo?' });
+    expect(banglish.status).toBe(200);
+    expect(typeof banglish.body.reply).toBe('string');
+    expect(banglish.body.reply.length).toBeGreaterThan(0);
+
     const draft = await request(app)
       .post('/v1/ai/create-habit')
       .set(customer.auth)

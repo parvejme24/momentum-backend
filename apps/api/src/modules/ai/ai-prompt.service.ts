@@ -104,6 +104,12 @@ export async function listPublishedFeatures(): Promise<AiFeatureCard[]> {
   const published = await prisma.aiPrompt.findMany({
     where: { status: 'PUBLISHED' },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    select: {
+      feature: true,
+      slug: true,
+      name: true,
+      description: true,
+    },
   });
 
   const byFeature = new Map<AiPromptFeature, AiFeatureCard>();

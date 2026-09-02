@@ -18,6 +18,7 @@ import type {
 import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
 import { assertCanAddHabit } from '../../lib/entitlements.js';
+import { LOG_ENTRY_SELECT, STREAK_LOG_SELECT } from '../../lib/log-query.js';
 import { prisma } from '../../lib/prisma.js';
 import { notifyHabitCreated } from '../notification/notification.events.js';
 
@@ -64,7 +65,7 @@ function toPublicHabit(habit: Habit, currentStreak: number): HabitResponse {
   };
 }
 
-function logsToMap(logs: HabitLog[]): Map<LocalDate, LogStatus> {
+function logsToMap(logs: Pick<HabitLog, 'localDate' | 'status'>[]): Map<LocalDate, LogStatus> {
   const map = new Map<LocalDate, LogStatus>();
   for (const log of logs) {
     map.set(localDate(log.localDate), log.status);
@@ -72,7 +73,9 @@ function logsToMap(logs: HabitLog[]): Map<LocalDate, LogStatus> {
   return map;
 }
 
-function groupLogsByHabit(logs: HabitLog[]): Map<string, Map<LocalDate, LogStatus>> {
+function groupLogsByHabit(
+  logs: Pick<HabitLog, 'habitId' | 'localDate' | 'status'>[],
+): Map<string, Map<LocalDate, LogStatus>> {
   const grouped = new Map<string, Map<LocalDate, LogStatus>>();
   for (const log of logs) {
     let habitLogs = grouped.get(log.habitId);
@@ -166,6 +169,7 @@ export async function listHabits(userId: string, archived = false): Promise<Habi
       habitId: { in: habits.map((h) => h.id) },
       localDate: { gte: new Date(windowStart) },
     },
+    select: STREAK_LOG_SELECT,
   });
 
   const logsByHabit = groupLogsByHabit(logs);
@@ -180,8 +184,7 @@ export async function listHabits(userId: string, archived = false): Promise<Habi
 }
 
 export async function createHabit(userId: string, input: CreateHabitInput): Promise<HabitResponse> {
-  await assertCanAddHabit(userId);
-  const prefs = await getUserPrefs(userId);
+  const [prefs] = await Promise.all([getUserPrefs(userId), assertCanAddHabit(userId)]);
   assertStartDateNotFuture(input.startDate, prefs.timezone);
 
   const schedule = normalizeScheduleForWrite(input);
@@ -213,12 +216,18 @@ export async function createHabit(userId: string, input: CreateHabitInput): Prom
   return toPublicHabit(habit, 0);
 }
 
-export async function getHabit(userId: string, habitId: string): Promise<HabitDetailResponse> {
+export async function getHabit(
+  userId: string,
+  habitId: string,
+  ownedHabit: Habit | null = null,
+): Promise<HabitDetailResponse> {
   const [prefs, habit] = await Promise.all([
     getUserPrefs(userId),
-    prisma.habit.findFirst({
-      where: { id: habitId, userId },
-    }),
+    ownedHabit
+      ? Promise.resolve(ownedHabit)
+      : prisma.habit.findFirst({
+          where: { id: habitId, userId },
+        }),
   ]);
   const today = todayIn(prefs.timezone);
   const historyStart = addDays(today, -(HISTORY_DAYS - 1));
@@ -233,6 +242,7 @@ export async function getHabit(userId: string, habitId: string): Promise<HabitDe
       habitId: habit.id,
       localDate: { gte: new Date(streakStart) },
     },
+    select: LOG_ENTRY_SELECT,
     orderBy: { localDate: 'asc' },
   });
 
@@ -261,12 +271,15 @@ export async function updateHabit(
   userId: string,
   habitId: string,
   input: UpdateHabitInput,
+  ownedHabit: Habit | null = null,
 ): Promise<HabitResponse> {
   const [prefs, existing] = await Promise.all([
     getUserPrefs(userId),
-    prisma.habit.findFirst({
-      where: { id: habitId, userId },
-    }),
+    ownedHabit
+      ? Promise.resolve(ownedHabit)
+      : prisma.habit.findFirst({
+          where: { id: habitId, userId },
+        }),
   ]);
 
   if (!existing) {
@@ -309,6 +322,7 @@ export async function updateHabit(
       habitId: habit.id,
       localDate: { gte: new Date(windowStart) },
     },
+    select: STREAK_LOG_SELECT,
   });
 
   const currentStreak = streakFor(toSchedule(habit), logsToMap(logs), today, prefs.weekStartsOn);
@@ -343,10 +357,16 @@ export async function reorderHabits(userId: string, ids: string[]): Promise<Habi
   return listHabits(userId, false);
 }
 
-export async function archiveHabit(userId: string, habitId: string): Promise<HabitResponse> {
-  const existing = await prisma.habit.findFirst({
-    where: { id: habitId, userId },
-  });
+export async function archiveHabit(
+  userId: string,
+  habitId: string,
+  ownedHabit: Habit | null = null,
+): Promise<HabitResponse> {
+  const existing =
+    ownedHabit ??
+    (await prisma.habit.findFirst({
+      where: { id: habitId, userId },
+    }));
 
   if (!existing) {
     throw AppError.notFound('Habit not found');
@@ -360,10 +380,16 @@ export async function archiveHabit(userId: string, habitId: string): Promise<Hab
   return toPublicHabit(habit, 0);
 }
 
-export async function restoreHabit(userId: string, habitId: string): Promise<HabitResponse> {
-  const existing = await prisma.habit.findFirst({
-    where: { id: habitId, userId },
-  });
+export async function restoreHabit(
+  userId: string,
+  habitId: string,
+  ownedHabit: Habit | null = null,
+): Promise<HabitResponse> {
+  const existing =
+    ownedHabit ??
+    (await prisma.habit.findFirst({
+      where: { id: habitId, userId },
+    }));
 
   if (!existing) {
     throw AppError.notFound('Habit not found');
@@ -385,6 +411,7 @@ export async function deleteHabit(
   userId: string,
   habitId: string,
   confirm: boolean,
+  ownedHabit: Habit | null = null,
 ): Promise<void> {
   if (!confirm) {
     throw AppError.validation('Check the highlighted fields', [
@@ -395,9 +422,11 @@ export async function deleteHabit(
     ]);
   }
 
-  const existing = await prisma.habit.findFirst({
-    where: { id: habitId, userId },
-  });
+  const existing =
+    ownedHabit ??
+    (await prisma.habit.findFirst({
+      where: { id: habitId, userId },
+    }));
 
   if (!existing) {
     throw AppError.notFound('Habit not found');

@@ -23,6 +23,7 @@ export async function listForHabit(req: Request, res: Response): Promise<void> {
   const reminders = await reminderService.listHabitReminders(
     requireUserId(req),
     requireParam(req, 'id'),
+    req.habit ?? null,
   );
   res.status(200).json({ reminders });
 }
@@ -32,6 +33,7 @@ export async function create(req: Request, res: Response): Promise<void> {
     requireUserId(req),
     requireParam(req, 'id'),
     req.body as CreateReminderInput,
+    req.habit ?? null,
   );
   res.status(201).json(result);
 }

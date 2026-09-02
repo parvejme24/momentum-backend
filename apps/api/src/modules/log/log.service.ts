@@ -19,6 +19,7 @@ import type {
 } from '@momentum/types';
 import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
+import { LOG_ENTRY_SELECT, STREAK_LOG_SELECT } from '../../lib/log-query.js';
 import { prisma } from '../../lib/prisma.js';
 import { assertLoggableLocalDate, fromPrismaDate, toPrismaDate } from '../../utils/date-guard.js';
 import { notifyHabitCompleted } from '../notification/notification.events.js';
@@ -41,7 +42,7 @@ function toSchedule(habit: Habit): HabitSchedule {
   };
 }
 
-function toLogEntry(row: HabitLog): LogEntry {
+function toLogEntry(row: Pick<HabitLog, 'localDate' | 'status' | 'value' | 'note'>): LogEntry {
   return {
     localDate: fromPrismaDate(row.localDate),
     status: row.status,
@@ -50,7 +51,7 @@ function toLogEntry(row: HabitLog): LogEntry {
   };
 }
 
-function logsToMap(logs: HabitLog[]): Map<LocalDate, LogStatus> {
+function logsToMap(logs: Pick<HabitLog, 'localDate' | 'status'>[]): Map<LocalDate, LogStatus> {
   const map = new Map<LocalDate, LogStatus>();
   for (const log of logs) {
     map.set(fromPrismaDate(log.localDate), log.status);
@@ -127,6 +128,7 @@ async function computeStreakSnapshot(
       userId,
       localDate: { gte: toPrismaDate(windowStart) },
     },
+    select: STREAK_LOG_SELECT,
   });
 
   const map = logsToMap(logs);
@@ -171,10 +173,11 @@ export async function upsertLog(
   habitId: string,
   rawLocalDate: string,
   input: UpsertLogInput,
+  ownedHabit: Habit | null = null,
 ): Promise<UpsertLogResponse> {
   const [prefs, habit] = await Promise.all([
     getUserPrefs(userId),
-    requireOwnedHabit(userId, habitId),
+    ownedHabit ? Promise.resolve(ownedHabit) : requireOwnedHabit(userId, habitId),
   ]);
   const date = assertLoggableLocalDate(rawLocalDate, prefs.timezone, habit.startDate);
   const { status, value } = resolveStatusAndValue(habit, input);
@@ -232,10 +235,11 @@ export async function deleteLog(
   userId: string,
   habitId: string,
   rawLocalDate: string,
+  ownedHabit: Habit | null = null,
 ): Promise<DeleteLogResponse> {
   const [prefs, habit] = await Promise.all([
     getUserPrefs(userId),
-    requireOwnedHabit(userId, habitId),
+    ownedHabit ? Promise.resolve(ownedHabit) : requireOwnedHabit(userId, habitId),
   ]);
   const date = assertLoggableLocalDate(rawLocalDate, prefs.timezone, habit.startDate);
 
@@ -259,8 +263,11 @@ export async function listHabitLogs(
   userId: string,
   habitId: string,
   query: LogRangeQuery,
+  ownedHabit: Habit | null = null,
 ): Promise<LogEntry[]> {
-  await requireOwnedHabit(userId, habitId);
+  if (!ownedHabit) {
+    await requireOwnedHabit(userId, habitId);
+  }
   const { from, to } = assertRange(query);
 
   const rows = await prisma.habitLog.findMany({
@@ -272,6 +279,7 @@ export async function listHabitLogs(
         lte: toPrismaDate(to),
       },
     },
+    select: LOG_ENTRY_SELECT,
     orderBy: { localDate: 'asc' },
   });
 
@@ -292,6 +300,7 @@ export async function listUserLogs(
         lte: toPrismaDate(to),
       },
     },
+    select: LOG_ENTRY_SELECT,
     orderBy: [{ localDate: 'asc' }, { habitId: 'asc' }],
   });
 

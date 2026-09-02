@@ -110,8 +110,11 @@ async function assertNoDuplicate(
 export async function listHabitReminders(
   userId: string,
   habitId: string,
+  ownedHabit: Habit | null = null,
 ): Promise<ReminderResponse[]> {
-  await requireOwnedHabit(userId, habitId);
+  if (!ownedHabit) {
+    await requireOwnedHabit(userId, habitId);
+  }
 
   const reminders = await prisma.reminder.findMany({
     where: { habitId },
@@ -125,8 +128,9 @@ export async function createReminder(
   userId: string,
   habitId: string,
   input: CreateReminderInput,
+  ownedHabit: Habit | null = null,
 ): Promise<CreateReminderResponse> {
-  const habit = await requireOwnedHabit(userId, habitId);
+  const habit = ownedHabit ?? (await requireOwnedHabit(userId, habitId));
 
   const count = await prisma.reminder.count({ where: { habitId } });
   if (count >= MAX_REMINDERS_PER_HABIT) {
@@ -184,7 +188,10 @@ export async function listGroupedReminders(userId: string): Promise<GroupedRemin
   const habits = await prisma.habit.findMany({
     where: { userId, archivedAt: null },
     orderBy: { sortOrder: 'asc' },
-    include: {
+    select: {
+      id: true,
+      title: true,
+      icon: true,
       reminders: {
         orderBy: [{ timeLocal: 'asc' }, { createdAt: 'asc' }],
       },

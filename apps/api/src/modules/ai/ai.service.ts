@@ -34,9 +34,11 @@ import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { assertHasAi, resolveUserEntitlements } from '../../lib/entitlements.js';
 import { AppError } from '../../lib/errors.js';
 import { generateGeminiJson, isGeminiConfigured } from '../../lib/gemini.js';
+import { STREAK_LOG_SELECT } from '../../lib/log-query.js';
 import { prisma } from '../../lib/prisma.js';
 import { fromPrismaDate, toPrismaDate } from '../../utils/date-guard.js';
 import { interpolatePrompt, listPublishedFeatures, resolvePrompt } from './ai-prompt.service.js';
+import { fallbackChatReply, loadChatSnapshot } from './ai-chat-context.js';
 
 const STREAK_LOOKBACK_DAYS = 120;
 
@@ -59,7 +61,7 @@ function toSchedule(habit: Habit): HabitSchedule {
   };
 }
 
-function logsToMap(logs: HabitLog[]): Map<LocalDate, LogStatus> {
+function logsToMap(logs: Pick<HabitLog, 'localDate' | 'status'>[]): Map<LocalDate, LogStatus> {
   const map = new Map<LocalDate, LogStatus>();
   for (const log of logs) {
     map.set(fromPrismaDate(log.localDate), log.status);
@@ -120,19 +122,19 @@ export async function getSuggestions(
   userId: string,
   input: AiSuggestionsInput,
 ): Promise<AiSuggestionsResponse> {
-  const entitlements = await assertHasAi(userId);
-
-  const user = await prisma.user.findFirst({
-    where: { id: userId, deletedAt: null },
-    select: { timezone: true, name: true },
-  });
-
-  const habits = await prisma.habit.findMany({
-    where: { userId, archivedAt: null },
-    orderBy: { sortOrder: 'asc' },
-    take: 12,
-    select: { id: true, title: true, scheduleType: true, type: true },
-  });
+  const [entitlements, user, habits] = await Promise.all([
+    assertHasAi(userId),
+    prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { timezone: true, name: true },
+    }),
+    prisma.habit.findMany({
+      where: { userId, archivedAt: null },
+      orderBy: { sortOrder: 'asc' },
+      take: 12,
+      select: { id: true, title: true, scheduleType: true, type: true },
+    }),
+  ]);
 
   const today = todayIn(user?.timezone ?? 'Asia/Dhaka');
   const habitsText =
@@ -235,19 +237,19 @@ export async function getHabitIdeas(
   userId: string,
   input: AiHabitIdeasInput,
 ): Promise<AiHabitIdeasResponse> {
-  const entitlements = await assertHasAi(userId);
-
-  const user = await prisma.user.findFirst({
-    where: { id: userId, deletedAt: null },
-    select: { name: true },
-  });
-
-  const habits = await prisma.habit.findMany({
-    where: { userId, archivedAt: null },
-    orderBy: { sortOrder: 'asc' },
-    take: 20,
-    select: { title: true },
-  });
+  const [entitlements, user, habits] = await Promise.all([
+    assertHasAi(userId),
+    prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { name: true },
+    }),
+    prisma.habit.findMany({
+      where: { userId, archivedAt: null },
+      orderBy: { sortOrder: 'asc' },
+      take: 20,
+      select: { title: true },
+    }),
+  ]);
 
   const existingTitles = habits.map((habit) => habit.title).join(', ') || 'none';
   const goal = input.goal?.trim() ?? 'build better daily routines';
@@ -335,12 +337,13 @@ export async function getHabitMessage(
   userId: string,
   input: AiHabitMessageInput,
 ): Promise<AiHabitMessageResponse> {
-  const entitlements = await assertHasAi(userId);
-  const prefs = await getUserPrefs(userId);
-
-  const habit = await prisma.habit.findFirst({
-    where: { id: input.habitId, userId, archivedAt: null },
-  });
+  const [entitlements, prefs, habit] = await Promise.all([
+    assertHasAi(userId),
+    getUserPrefs(userId),
+    prisma.habit.findFirst({
+      where: { id: input.habitId, userId, archivedAt: null },
+    }),
+  ]);
   if (!habit) throw AppError.notFound('Habit not found');
 
   const today = todayIn(prefs.timezone);
@@ -351,6 +354,7 @@ export async function getHabitMessage(
       userId,
       localDate: { gte: toPrismaDate(windowStart) },
     },
+    select: STREAK_LOG_SELECT,
   });
 
   const map = logsToMap(logs);
@@ -412,22 +416,14 @@ function fallbackHabitMessage(
 }
 
 export async function chat(userId: string, input: AiChatInput): Promise<AiChatResponse> {
-  const entitlements = await assertHasAi(userId);
-  const prefs = await getUserPrefs(userId);
-  const today = todayIn(prefs.timezone);
-  const user = await prisma.user.findFirst({
-    where: { id: userId, deletedAt: null },
-    select: { name: true },
-  });
+  const message = input.message.trim();
+  const [entitlements, snapshot] = await Promise.all([
+    assertHasAi(userId),
+    loadChatSnapshot(userId, message, input.habitId),
+  ]);
 
-  let focusedHabit = 'none';
-  if (input.habitId) {
-    const habit = await prisma.habit.findFirst({
-      where: { id: input.habitId, userId, archivedAt: null },
-      select: { title: true, type: true, scheduleType: true },
-    });
-    if (!habit) throw AppError.notFound('Habit not found');
-    focusedHabit = `${habit.title} (${habit.type}, ${habit.scheduleType})`;
+  if (input.habitId && !snapshot.focusedTitle) {
+    throw AppError.notFound('Habit not found');
   }
 
   const history =
@@ -435,23 +431,38 @@ export async function chat(userId: string, input: AiChatInput): Promise<AiChatRe
       ? input.history.map((turn) => `${turn.role}: ${turn.content}`).join('\n')
       : 'none';
 
+  const languageLine =
+    snapshot.language === 'bangla'
+      ? 'Reply in Bangla (বাংলা script).'
+      : snapshot.language === 'banglish'
+        ? 'Reply in Banglish (Romanized Bangla mixed with English).'
+        : 'Reply in English.';
+
   const { prompt, promptSlug } = await composePrompt(
     'chat',
     {
-      userName: user?.name ?? 'there',
-      today,
-      habits: await loadHabitList(userId),
-      habitTitle: focusedHabit,
+      userName: snapshot.userName,
+      today: snapshot.today,
+      habits: snapshot.habitsText,
+      progress: snapshot.progressText,
+      habitTitle: snapshot.focusedTitle ?? 'none',
       history,
-      message: input.message.trim(),
+      message,
     },
-    'Return JSON only: { "reply": "your answer here" }',
+    `AUTHORITATIVE USER DATA — quote these numbers, do not invent different stats:
+${snapshot.progressText}
+
+${languageLine}
+Answer ONLY habit/streak/logging/schedule/behavior-change questions for THIS user.
+If off-topic, refuse in one sentence in the same language, then point back to their habits.
+Be warm, specific, and concise. No guilt, no medical diagnoses, no hashtags.
+Return JSON only: { "reply": "your answer here" }`,
   );
 
   const gemini = await generateGeminiJson(prompt, geminiChatJsonSchema);
   if (gemini) {
     return {
-      reply: gemini.reply.trim(),
+      reply: gemini.reply.trim().slice(0, 2000),
       planSlug: entitlements.planSlug,
       source: 'gemini',
       promptSlug,
@@ -459,35 +470,27 @@ export async function chat(userId: string, input: AiChatInput): Promise<AiChatRe
   }
 
   return {
-    reply: fallbackChatReply(input.message),
+    reply: fallbackChatReply(message, snapshot),
     planSlug: entitlements.planSlug,
     source: 'fallback',
     promptSlug,
   };
 }
 
-function fallbackChatReply(message: string): string {
-  const text = message.toLowerCase();
-  if (text.includes('create') || text.includes('new habit')) {
-    return 'Tell me the habit you want to start and how often. I can turn that into a ready-to-save habit with Create habit.';
-  }
-  if (text.includes('idea') || text.includes('suggest') || text.includes('generate')) {
-    return 'Share a goal — sleep, focus, fitness, reading — and I can generate a few small habit ideas you can try this week.';
-  }
-  return 'I can help with streaks, schedules, missed days, and new habits. What do you want to improve first?';
-}
-
 export async function createHabitDraft(
   userId: string,
   input: AiCreateHabitInput,
 ): Promise<AiCreateHabitResponse> {
-  const entitlements = await assertHasAi(userId);
-  const prefs = await getUserPrefs(userId);
+  const [entitlements, prefs, user, habitsText] = await Promise.all([
+    assertHasAi(userId),
+    getUserPrefs(userId),
+    prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { name: true },
+    }),
+    loadHabitList(userId),
+  ]);
   const today = todayIn(prefs.timezone);
-  const user = await prisma.user.findFirst({
-    where: { id: userId, deletedAt: null },
-    select: { name: true },
-  });
 
   const message = input.message?.trim() || input.goal?.trim() || 'a simple daily habit';
   const goal = input.goal?.trim() || message;
@@ -499,7 +502,7 @@ export async function createHabitDraft(
       today,
       message,
       goal,
-      habits: await loadHabitList(userId),
+      habits: habitsText,
     },
     `Return JSON only:
 {

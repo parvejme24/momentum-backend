@@ -231,7 +231,7 @@ export const geminiSuggestionsJsonSchema = z.object({
 });
 
 export const geminiChatJsonSchema = z.object({
-  reply: z.string().min(1).max(1200),
+  reply: z.string().min(1).max(2000),
 });
 
 export const geminiCreateHabitJsonSchema = z.object({

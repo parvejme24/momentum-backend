@@ -24,23 +24,29 @@ function requireParam(req: Request, key: string): string {
   return value;
 }
 
+const PUBLIC_CACHE = 'public, max-age=30, stale-while-revalidate=120';
+
 export async function listPublic(_req: Request, res: Response): Promise<void> {
   const plans = await pricingService.listPublishedPlans();
+  res.setHeader('Cache-Control', PUBLIC_CACHE);
   res.status(200).json({ plans });
 }
 
 export async function getPublicBySlug(req: Request, res: Response): Promise<void> {
   const plan = await pricingService.getPublishedPlanBySlug(requireParam(req, 'slug'));
+  res.setHeader('Cache-Control', PUBLIC_CACHE);
   res.status(200).json({ plan });
 }
 
 export async function compare(_req: Request, res: Response): Promise<void> {
   const result = await pricingService.getCompareTable();
+  res.setHeader('Cache-Control', PUBLIC_CACHE);
   res.status(200).json(result);
 }
 
 export async function packages(_req: Request, res: Response): Promise<void> {
   const result = await pricingService.listPricingPackages();
+  res.setHeader('Cache-Control', PUBLIC_CACHE);
   res.status(200).json(result);
 }
 

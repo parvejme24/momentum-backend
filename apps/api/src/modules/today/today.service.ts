@@ -14,13 +14,21 @@ import {
 import type { TodayQuery, TodayResponse } from '@momentum/types';
 import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
+import { LOG_ENTRY_SELECT } from '../../lib/log-query.js';
 import { prisma } from '../../lib/prisma.js';
 import { fromPrismaDate, toPrismaDate } from '../../utils/date-guard.js';
 import { resolveTodayDate } from '../../utils/parse-range.js';
 
 const STREAK_LOOKBACK_DAYS = 400;
 
-function toSchedule(habit: Habit): HabitSchedule {
+type ScheduleHabit = Pick<
+  Habit,
+  'scheduleType' | 'scheduleDays' | 'targetPerWeek' | 'intervalDays' | 'startDate'
+>;
+
+type TodayLog = Pick<HabitLog, 'habitId' | 'localDate' | 'status' | 'value' | 'note'>;
+
+function toSchedule(habit: ScheduleHabit): HabitSchedule {
   return {
     scheduleType: habit.scheduleType,
     scheduleDays: habit.scheduleDays,
@@ -30,7 +38,7 @@ function toSchedule(habit: Habit): HabitSchedule {
   };
 }
 
-function groupLogs(logs: HabitLog[]): Map<string, Map<LocalDate, LogStatus>> {
+function groupLogs(logs: TodayLog[]): Map<string, Map<LocalDate, LogStatus>> {
   const grouped = new Map<string, Map<LocalDate, LogStatus>>();
   for (const log of logs) {
     let habitLogs = grouped.get(log.habitId);
@@ -44,7 +52,6 @@ function groupLogs(logs: HabitLog[]): Map<string, Map<LocalDate, LogStatus>> {
 }
 
 export async function getToday(userId: string, query: TodayQuery): Promise<TodayResponse> {
-  // Query 1: user + active habits
   const user = await prisma.user.findFirst({
     where: { id: userId, deletedAt: null },
     select: {
@@ -53,6 +60,20 @@ export async function getToday(userId: string, query: TodayQuery): Promise<Today
       habits: {
         where: { archivedAt: null },
         orderBy: { sortOrder: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          icon: true,
+          color: true,
+          type: true,
+          scheduleType: true,
+          scheduleDays: true,
+          targetPerWeek: true,
+          intervalDays: true,
+          startDate: true,
+          targetValue: true,
+          unit: true,
+        },
       },
     },
   });
@@ -65,9 +86,8 @@ export async function getToday(userId: string, query: TodayQuery): Promise<Today
   const habits = user.habits;
   const habitIds = habits.map((h) => h.id);
 
-  // Query 2: all logs for streak window
   const windowStart = addDays(date, -STREAK_LOOKBACK_DAYS);
-  const logs =
+  const logs: TodayLog[] =
     habitIds.length === 0
       ? []
       : await prisma.habitLog.findMany({
@@ -75,9 +95,16 @@ export async function getToday(userId: string, query: TodayQuery): Promise<Today
             habitId: { in: habitIds },
             localDate: { gte: toPrismaDate(windowStart) },
           },
+          select: LOG_ENTRY_SELECT,
         });
 
   const logsByHabit = groupLogs(logs);
+  const todayLogs = new Map<string, TodayLog>();
+  for (const log of logs) {
+    if (fromPrismaDate(log.localDate) === date) {
+      todayLogs.set(log.habitId, log);
+    }
+  }
 
   const dueItems: TodayResponse['habits'] = [];
   const notDueItems: TodayResponse['notDueToday'] = [];
@@ -106,9 +133,7 @@ export async function getToday(userId: string, query: TodayQuery): Promise<Today
     if (dayStatus === 'SKIPPED') skipped += 1;
 
     const current = streakFor(schedule, habitLogs, date, user.weekStartsOn);
-    const dayLog = dayStatus
-      ? logs.find((l) => l.habitId === habit.id && fromPrismaDate(l.localDate) === date)
-      : undefined;
+    const dayLog = todayLogs.get(habit.id);
 
     dueItems.push({
       id: habit.id,

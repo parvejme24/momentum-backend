@@ -22,13 +22,24 @@ import type {
 import type { Habit, HabitLog } from '../../generated/prisma/client.js';
 import { AppError } from '../../lib/errors.js';
 import { assertHasStats } from '../../lib/entitlements.js';
+import { LOG_ENTRY_SELECT, STREAK_LOG_SELECT } from '../../lib/log-query.js';
 import { prisma } from '../../lib/prisma.js';
 import { fromPrismaDate, toPrismaDate } from '../../utils/date-guard.js';
 import { parseRange } from '../../utils/parse-range.js';
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const STREAK_LOOKBACK_DAYS = 400;
 
-function toSchedule(habit: Habit): HabitSchedule {
+type ScheduleHabit = Pick<
+  Habit,
+  'scheduleType' | 'scheduleDays' | 'targetPerWeek' | 'intervalDays' | 'startDate'
+>;
+
+type HeatmapHabit = ScheduleHabit & Pick<Habit, 'targetValue'>;
+type StreakLog = Pick<HabitLog, 'habitId' | 'localDate' | 'status'>;
+type RangeLog = Pick<HabitLog, 'habitId' | 'localDate' | 'status' | 'value' | 'note'>;
+
+function toSchedule(habit: ScheduleHabit): HabitSchedule {
   return {
     scheduleType: habit.scheduleType,
     scheduleDays: habit.scheduleDays,
@@ -38,7 +49,7 @@ function toSchedule(habit: Habit): HabitSchedule {
   };
 }
 
-function logsToMap(logs: HabitLog[]): Map<LocalDate, LogStatus> {
+function logsToMap(logs: Pick<HabitLog, 'localDate' | 'status'>[]): Map<LocalDate, LogStatus> {
   const map = new Map<LocalDate, LogStatus>();
   for (const log of logs) {
     map.set(fromPrismaDate(log.localDate), log.status);
@@ -46,8 +57,8 @@ function logsToMap(logs: HabitLog[]): Map<LocalDate, LogStatus> {
   return map;
 }
 
-function groupLogs(logs: HabitLog[]): Map<string, HabitLog[]> {
-  const grouped = new Map<string, HabitLog[]>();
+function groupLogs(logs: StreakLog[]): Map<string, StreakLog[]> {
+  const grouped = new Map<string, StreakLog[]>();
   for (const log of logs) {
     const list = grouped.get(log.habitId) ?? [];
     list.push(log);
@@ -93,7 +104,7 @@ function classifyDueDays(
   };
 }
 
-function heatmapLevel(habit: Habit, status: LogStatus, value: number | null): number {
+function heatmapLevel(habit: HeatmapHabit, status: LogStatus, value: number | null): number {
   if (habit.targetValue !== null && value !== null && habit.targetValue > 0) {
     const ratio = value / habit.targetValue;
     if (ratio >= 1) return 4;
@@ -110,25 +121,26 @@ export async function getHabitStats(
   userId: string,
   habitId: string,
   query: HabitStatsQuery,
+  ownedHabit: Habit | null = null,
 ): Promise<HabitStatsResponse> {
-  const [, habit] = await Promise.all([
+  const [, habit, prefs] = await Promise.all([
     assertHasStats(userId),
-    prisma.habit.findFirst({
-      where: { id: habitId, userId },
-      include: {
-        user: { select: { timezone: true, weekStartsOn: true, deletedAt: true } },
-      },
+    ownedHabit
+      ? Promise.resolve(ownedHabit)
+      : prisma.habit.findFirst({ where: { id: habitId, userId } }),
+    prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { timezone: true, weekStartsOn: true },
     }),
   ]);
-  if (!habit || habit.user.deletedAt) throw AppError.notFound('Habit not found');
 
-  const prefs = habit.user;
+  if (!habit || !prefs) throw AppError.notFound('Habit not found');
+
   const range = parseRange(query.range, prefs.timezone, localDate(habit.startDate));
   const schedule = toSchedule(habit);
-  const lookbackFrom = addDays(range.to, -400);
+  const lookbackFrom = addDays(range.to, -STREAK_LOOKBACK_DAYS);
 
-  // Query 2: logs for range + streak lookback
-  const logs = await prisma.habitLog.findMany({
+  const logs: RangeLog[] = await prisma.habitLog.findMany({
     where: {
       habitId,
       userId,
@@ -137,6 +149,7 @@ export async function getHabitStats(
         lte: toPrismaDate(range.to),
       },
     },
+    select: LOG_ENTRY_SELECT,
     orderBy: { localDate: 'asc' },
   });
 
@@ -237,6 +250,16 @@ export async function getOverviewStats(
         habits: {
           where: { archivedAt: null },
           orderBy: { sortOrder: 'asc' },
+          select: {
+            id: true,
+            title: true,
+            icon: true,
+            scheduleType: true,
+            scheduleDays: true,
+            targetPerWeek: true,
+            intervalDays: true,
+            startDate: true,
+          },
         },
       },
     }),
@@ -247,17 +270,22 @@ export async function getOverviewStats(
   const range = parseRange(query.range, prefs.timezone);
   const habits = user.habits;
   const habitIds = habits.map((h) => h.id);
+  const lookbackFrom = addDays(range.to, -STREAK_LOOKBACK_DAYS);
+  const logsFrom = lookbackFrom < range.from ? lookbackFrom : range.from;
 
-  // Query 2: all logs up to today (range stats + daysTracked)
-  const logs =
+  const logs: StreakLog[] =
     habitIds.length === 0
       ? []
       : await prisma.habitLog.findMany({
           where: {
             userId,
             habitId: { in: habitIds },
-            localDate: { lte: toPrismaDate(range.to) },
+            localDate: {
+              gte: toPrismaDate(logsFrom),
+              lte: toPrismaDate(range.to),
+            },
           },
+          select: STREAK_LOG_SELECT,
         });
 
   const logsByHabit = groupLogs(logs);
@@ -266,7 +294,9 @@ export async function getOverviewStats(
     statusByHabit.set(habit.id, logsToMap(logsByHabit.get(habit.id) ?? []));
   }
 
-  const daysTracked = new Set(logs.map((l) => fromPrismaDate(l.localDate))).size;
+  const daysTracked = new Set(
+    logs.map((l) => fromPrismaDate(l.localDate)).filter((d) => d >= range.from && d <= range.to),
+  ).size;
 
   let totalDue = 0;
   let totalDone = 0;
