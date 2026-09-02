@@ -112,7 +112,7 @@ jobs:
       # and never invents new ones. If a migration is missing from the repo,
       # this is where it surfaces — in a PR, not on the server.
       - name: Apply migrations
-        run: npm exec -w @momentum/api -- prisma migrate deploy
+        run: npm run db:deploy
 
       - name: Lint
         run: npm run lint
