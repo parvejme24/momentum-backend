@@ -1,0 +1,11 @@
+# Strip Cursor's automatic co-author trailer so GitHub lists only the repo owner.
+node --input-type=module -e '
+import { readFileSync, writeFileSync } from "node:fs";
+const file = process.argv[1];
+const next = readFileSync(file, "utf8")
+  .split(/\r?\n/)
+  .filter((line) => !/^Co-authored-by:\s*Cursor\b/i.test(line))
+  .join("\n")
+  .replace(/\n+$/, "\n");
+writeFileSync(file, next);
+' "$1"
