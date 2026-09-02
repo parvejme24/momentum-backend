@@ -6,6 +6,19 @@ import { defineConfig } from 'prisma/config';
 const root = dirname(fileURLToPath(import.meta.url));
 loadDotenv({ path: join(root, '../../.env') });
 
+/** Neon pooled hosts are `ep-…-pooler.…`. Prisma migrate needs the unpooled host. */
+function withoutNeonPooler(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname.includes('-pooler.')) {
+      parsed.hostname = parsed.hostname.replace('-pooler.', '.');
+    }
+    return parsed.toString();
+  } catch {
+    return url.replace('-pooler.', '.');
+  }
+}
+
 function migrateUrl(): string {
   const url =
     process.env.DIRECT_URL ||
@@ -13,13 +26,7 @@ function migrateUrl(): string {
     'postgresql://postgres:postgres@127.0.0.1:5432/postgres';
 
   const isMigrate = process.argv.some((arg) => arg === 'migrate');
-  if (isMigrate && url.includes('-pooler')) {
-    throw new Error(
-      'Prisma migrate needs DIRECT_URL on the Neon unpooled host (no "-pooler" in the hostname). Keep DATABASE_URL on the pooler for the API.',
-    );
-  }
-
-  return url;
+  return isMigrate ? withoutNeonPooler(url) : url;
 }
 
 export default defineConfig({
