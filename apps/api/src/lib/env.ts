@@ -106,6 +106,8 @@ const envSchema = z.object({
   APP_URL: z.string().url().default('http://localhost:3000'),
   /** Public backend base URL — used for SSLCommerz IPN webhooks. */
   API_URL: z.string().url().optional(),
+  /** Set automatically by Render — the service's public URL (used for keep-alive pings). */
+  RENDER_EXTERNAL_URL: z.string().url().optional(),
 
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().int().positive().optional(),

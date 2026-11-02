@@ -1,0 +1,28 @@
+name: Keep Alive
+
+# Pings the Render backend every 10 minutes so the free instance never sleeps.
+# Unlike the in-app self-ping, this can also wake the server if it's already asleep.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: Ping
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "::error::Repository variable BACKEND_URL is not set."
+            echo "Set it with: gh variable set BACKEND_URL --body \"https://<your-service>.onrender.com/\""
+            echo "or in GitHub: Settings → Secrets and variables → Actions → Variables → New repository variable."
+            exit 1
+          fi
+          # Retries let a 30–60s cold start still count as a success.
+          curl -fsS --retry 3 --retry-delay 20 --retry-all-errors --max-time 90 "$BACKEND_URL" -o /dev/null -w "HTTP %{http_code} in %{time_total}s\n"

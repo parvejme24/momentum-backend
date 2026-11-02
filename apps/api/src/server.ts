@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import type { Server } from 'socket.io';
 import { createApp } from './app.js';
 import { env } from './lib/env.js';
+import { startKeepAlive } from './lib/keep-alive.js';
 import { logger } from './lib/logger.js';
 import { redis } from './lib/redis.js';
 import { setupSocket } from './socket.js';
@@ -12,6 +13,7 @@ async function main() {
 
   httpServer.listen(env.PORT, '0.0.0.0', () => {
     logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Momentum API listening');
+    startKeepAlive();
   });
 
   let io: Server | undefined;
